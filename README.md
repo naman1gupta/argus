@@ -55,11 +55,13 @@ the dashboards are alive from the first click. Demo rows are tagged `environment
 
 ## Demo video
 
-A 5-minute silent walkthrough (captioned, 1080p) is included with the submission:
+An 8-minute silent walkthrough (captioned, 1080p) is included with the submission:
 architecture → `docker compose ps` → dashboards → live streaming from Groq with a
 mid-stream cancel → the Kafka-backed live request tail → trace detail with PII masking
 → the ingestion contract, Kafka consumer group, burst test, schema and test suites
-→ session replay and evidence export → projects, keys and budget alerts → RBAC → mobile.
+→ a live resilience demo (Kafka killed mid-flight, then the consumer, watching the backlog
+build to 1,300 and drain to zero) → the API surface, SDK internals, schema, indexes, key
+hashing, RBAC proof and evidence export → session replay → projects and budgets → mobile.
 
 ## A guided tour (what to click, in order)
 
