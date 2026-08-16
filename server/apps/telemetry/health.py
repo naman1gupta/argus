@@ -11,8 +11,15 @@ log = logging.getLogger(__name__)
 
 async def consumer_lag() -> int | None:
     """Sum of (end offset - committed offset) across the events topic; None if unavailable."""
+    # The topic must be passed here: a consumer with no subscription has no
+    # metadata for it, and partitions_for_topic() then returns None — which
+    # silently reports zero lag no matter how deep the real backlog is.
     consumer = AIOKafkaConsumer(
-        bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS, request_timeout_ms=3000
+        settings.KAFKA_EVENTS_TOPIC,
+        bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
+        request_timeout_ms=3000,
+        enable_auto_commit=False,
+        group_id=None,
     )
     admin = AIOKafkaAdminClient(
         bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS, request_timeout_ms=3000
@@ -23,7 +30,7 @@ async def consumer_lag() -> int | None:
         partitions = consumer.partitions_for_topic(settings.KAFKA_EVENTS_TOPIC) or set()
         tps = [TopicPartition(settings.KAFKA_EVENTS_TOPIC, p) for p in partitions]
         if not tps:
-            return 0
+            return None  # metadata unavailable — report unknown, never a false zero
         end = await consumer.end_offsets(tps)
         beginning = await consumer.beginning_offsets(tps)
         committed = await admin.list_consumer_group_offsets(
