@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 from ulid import ULID
 
@@ -12,6 +13,12 @@ class Session(models.Model):
 
     id = models.CharField(primary_key=True, max_length=26, default=new_ulid, editable=False)
     title = models.CharField(max_length=200, blank=True, default="")
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, on_delete=models.CASCADE, related_name="sessions"
+    )
+    project = models.ForeignKey(
+        "projects.Project", null=True, on_delete=models.SET_NULL, related_name="sessions"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

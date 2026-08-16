@@ -35,10 +35,12 @@ class InferenceLog(models.Model):
 
     id = models.CharField(primary_key=True, max_length=26, default=new_ulid, editable=False)
     generation_id = models.CharField(max_length=64, unique=True)
-    # Denormalized (no FK): telemetry must ingest sessions the chat app has
-    # never seen — the SDK is usable by any external application.
+    # Denormalized (no FKs): telemetry must ingest sessions/users the chat app
+    # has never seen — the SDK is usable by any external application.
     session_id = models.CharField(max_length=200, blank=True, default="")
     trace_id = models.CharField(max_length=64, blank=True, default="")
+    project_id = models.CharField(max_length=26, db_index=True)
+    end_user_id = models.CharField(max_length=128, blank=True, default="")
 
     provider = models.CharField(max_length=32, choices=Provider.choices)
     request_model = models.CharField(max_length=100)

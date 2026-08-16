@@ -27,18 +27,30 @@ ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").sp
 INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.auth",
+    "django.contrib.sessions",
     "django.contrib.postgres",
+    "apps.accounts",
+    "apps.projects",
     "apps.chat",
     "apps.telemetry",
     "apps.insights",
 ]
 
+AUTH_USER_MODEL = "accounts.User"
+
+# No GZipMiddleware: it buffers streaming responses and breaks SSE.
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
-    # NOTE: no GZipMiddleware — it buffers streaming responses and would
-    # silently break the SSE endpoints (chat streaming + live tail).
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
 ]
+
+SESSION_COOKIE_HTTPONLY = True
+CSRF_TRUSTED_ORIGINS = os.environ.get(
+    "CSRF_TRUSTED_ORIGINS", "http://localhost:3000,http://localhost:5173,http://localhost:8000"
+).split(",")
 
 ROOT_URLCONF = "config.urls"
 
