@@ -74,9 +74,10 @@ export const Delta = ({ now, prev, invert }: { now: number; prev: number; invert
   if (!prev) return null
   const pct = ((now - prev) / prev) * 100
   const good = invert ? pct <= 0 : pct >= 0
+  const magnitude = Math.abs(pct) > 999 ? '>999' : Math.abs(pct).toFixed(1)
   return (
-    <span style={{ color: good ? 'var(--goodink)' : 'var(--errink)' }}>
-      {pct >= 0 ? '▲' : '▼'} {Math.abs(pct).toFixed(1)}%
+    <span style={{ color: good ? 'var(--goodink)' : 'var(--errink)' }} title="vs previous period">
+      {pct >= 0 ? '▲' : '▼'} {magnitude}%
     </span>
   )
 }

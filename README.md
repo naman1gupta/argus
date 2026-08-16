@@ -155,6 +155,12 @@ cd sdk && ../server/.venv/bin/python -m pytest # sdk suite
 
 Interactive API docs (Swagger) at **http://localhost:8000/api/v1/docs**.
 
+Stress-test the pipeline (needs `pip install httpx`; watch consumer lag in the UI footer):
+
+```bash
+python scripts/burst_demo.py --events 2000 --key argus_sk_dev-chat-key-change-me
+```
+
 ## Troubleshooting
 
 - **Port already in use**: the app uses 3000 (UI) and 8000 (API). Postgres/Kafka host
