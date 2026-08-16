@@ -1,6 +1,8 @@
+import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth'
+import { api } from '../lib/api'
 import { useTheme } from '../theme'
 
 const NAV = [
@@ -36,6 +38,12 @@ export default function Layout() {
   const { theme, toggle } = useTheme()
   const navigate = useNavigate()
   const [menuOpen, setMenuOpen] = useState(false)
+  const health = useQuery({
+    queryKey: ['health'],
+    queryFn: () => api<{ status: string; consumer_lag: number | null }>('/health'),
+    refetchInterval: 15000,
+  })
+  const lag = health.data?.consumer_lag
   const isAdmin = me?.role === 'admin'
   const items = NAV.filter(n => isAdmin || !n.admin)
   const groups = [...new Set(items.map(i => i.group))]
@@ -72,7 +80,9 @@ export default function Layout() {
         </div>
       ))}
       <div className="mt-auto px-2.5 py-3 text-[11px] leading-relaxed border-t" style={{ color: 'var(--muted)', borderColor: 'var(--border)' }}>
-        API <span style={{ color: 'var(--good)' }}>●</span> healthy · argus-sdk v0.1.0
+        API <span style={{ color: health.isError ? 'var(--errink)' : 'var(--good)' }}>●</span>{' '}
+        {health.isError ? 'unreachable' : 'healthy'} · consumer lag{' '}
+        <b style={{ color: lag != null && lag > 100 ? 'var(--warn)' : 'var(--ink2)' }}>{lag ?? '—'}</b>
         <br />
         <a href="/api/v1/docs" target="_blank" rel="noreferrer" className="underline" style={{ color: 'var(--muted)' }}>
           API docs ↗

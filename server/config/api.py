@@ -25,5 +25,8 @@ api.add_router("", ingest_router)
 
 
 @api.get("/health", tags=["ops"])
-def health(request):
-    return {"status": "ok"}
+async def health(request):
+    """Liveness + pipeline observability: total consumer-group lag on the events topic."""
+    from apps.telemetry.health import consumer_lag
+
+    return {"status": "ok", "consumer_lag": await consumer_lag()}

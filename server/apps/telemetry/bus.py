@@ -28,12 +28,23 @@ async def get_producer() -> AIOKafkaProducer:
 
 async def send_event(key: str, event: dict) -> bool:
     """Returns False when Kafka is unavailable so callers can fall back to a direct write."""
+    return await send_many([(key, event)])
+
+
+async def send_many(items: list[tuple[str, dict]]) -> bool:
+    """Produces a whole batch, awaiting acks once at the end (not per event).
+    All-or-nothing: on failure the caller falls back to direct writes."""
+    global _producer
     try:
         producer = await get_producer()
-        await producer.send_and_wait(settings.KAFKA_EVENTS_TOPIC, value=event, key=key)
+        futures = [
+            await producer.send(settings.KAFKA_EVENTS_TOPIC, value=event, key=key)
+            for key, event in items
+        ]
+        for fut in futures:
+            await fut
         return True
     except Exception as exc:
-        global _producer
         _producer = None
         log.warning("kafka unavailable, falling back to direct write: %s", exc)
         return False

@@ -51,6 +51,7 @@ async def ingest_logs(request, envelope: IngestEnvelope):
         return 400, {"detail": f"batch exceeds {MAX_BATCH} events"}
 
     results: list[IngestResultItem] = []
+    valid: list[tuple[str, dict]] = []
     mode = "queued"
     for item in envelope.batch:
         try:
@@ -68,11 +69,15 @@ async def ingest_logs(request, envelope: IngestEnvelope):
             "type": event.type,
             "body": body.dict(),
         }
-        key = body.session_id or body.generation_id
-        if not await bus.send_event(key, payload):
-            mode = "direct"
-            await sync_to_async(persist.persist_event)(project.id, event.type, body.dict())
+        valid.append((body.session_id or body.generation_id, payload))
         results.append(IngestResultItem(id=event.id, status=201))
+
+    if valid and not await bus.send_many(valid):
+        mode = "direct"
+        for _, payload in valid:
+            await sync_to_async(persist.persist_event)(
+                project.id, payload["type"], payload["body"]
+            )
 
     rejected = sum(1 for r in results if r.status >= 400)
     response = IngestResponse(

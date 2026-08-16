@@ -42,13 +42,13 @@ def fake_bus(monkeypatch):
 
     fake = FakeBus()
 
-    async def send_event(key, event):
+    async def send_many(items):
         if not fake.available:
             return False
-        fake.sent.append((key, event))
+        fake.sent.extend(items)
         return True
 
     from apps.telemetry import api as ingest_api
 
-    monkeypatch.setattr(ingest_api.bus, "send_event", send_event)
+    monkeypatch.setattr(ingest_api.bus, "send_many", send_many)
     return fake
