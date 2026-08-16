@@ -150,6 +150,18 @@ export default function Chat() {
             <span className="chip">streaming <b>on</b></span>
             {sessionId && <span className="chip ml-auto hidden sm:inline mono">session {sessionId.slice(0, 10)}…</span>}
           </div>
+          {pm.startsWith('mock') && (
+            <div
+              className="px-4 py-2 text-[11.5px] border-b"
+              style={{ color: 'var(--muted)', borderColor: 'var(--border)', background: 'var(--surface2)' }}
+            >
+              Mock provider echoes your message instead of answering it — it exists so every
+              feature is demoable with zero API keys.{' '}
+              {(providers.data ?? []).some(p => p.available && p.name !== 'mock')
+                ? 'Pick a configured provider above for real model responses.'
+                : 'Add GROQ_API_KEY, GEMINI_API_KEY or ANTHROPIC_API_KEY to .env for real model responses.'}
+            </div>
+          )}
 
           <div ref={bodyRef} className="flex-1 overflow-y-auto p-4">
             {msgs.length === 0 && (

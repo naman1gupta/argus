@@ -132,33 +132,52 @@ class GeminiAdapter(Adapter):
                 yield chunk.text
 
 
-MOCK_REPLIES = [
-    "Here's what I found. The key idea is to keep telemetry capture out of the request's "
-    "critical path: buffer events locally, ship them in the background, and never let the "
-    "logging layer take the application down with it. That principle shapes every part of "
-    "this system's design.",
-    "Good question. For multi-turn conversations the context window is rebuilt from stored "
-    "messages on every call, which keeps the server stateless and lets any replica serve any "
-    "session. The trade-off is token growth per turn — production systems add summarization.",
-    "Sure — refunds for damaged items are processed within 3-5 business days after the claim "
-    "is approved. You'll need the order number and a photo of the damage. Once submitted, "
-    "you'll receive email confirmation and the amount returns to the original payment method.",
-    "Kafka consumer groups rebalance whenever membership changes. Each partition is owned by "
-    "exactly one consumer in the group; on rebalance, ownership reshuffles and consumers must "
-    "commit offsets carefully to avoid reprocessing or loss — that's why manual commits after "
-    "successful persistence matter.",
+MOCK_NOTES = [
+    "Telemetry capture stays off the request's critical path here: events are buffered "
+    "locally and shipped in the background, so the logging layer can never take the "
+    "application down with it.",
+    "Multi-turn context is rebuilt from stored messages on every call, which keeps the "
+    "server stateless — any replica can serve any session.",
+    "Each inference is logged twice: once when it starts (you see it as pending in the "
+    "live tail) and once when it finishes, merged idempotently by generation id.",
+    "Streaming telemetry is per-provider: time-to-first-token is measured at the first "
+    "content delta, and an aborted stream is flagged with estimated usage rather than a "
+    "guess.",
 ]
 
 
 class MockAdapter(Adapter):
-    """Zero-key demo provider; exercises the SDK's manual instrumentation API.
-    Prompts containing 'trigger error' raise, to demo the error path live."""
+    """Zero-key demo provider so the system is fully demoable without API keys.
 
-    name, label = "mock", "Mock (no key needed)"
+    It does not answer the question — it echoes it and says so, because a canned
+    answer to a real question reads as a broken chatbot. Configure any provider
+    key for real completions. 'trigger error' raises, to demo the error path.
+    """
+
+    name, label = "mock", "Mock — echoes your message (no API key needed)"
     models = ["argus-demo-1"]
 
     def available(self):
         return True
+
+    def _reply(self, prompt: str, turn_count: int) -> str:
+        digest = int(hashlib.sha1(prompt.encode()).hexdigest(), 16)
+        note = MOCK_NOTES[digest % len(MOCK_NOTES)]
+        asked = prompt.strip()
+        if len(asked) > 220:
+            asked = asked[:220].rstrip() + "…"
+        turn = (
+            f" This is turn {turn_count} of our conversation, so multi-turn context works."
+            if turn_count > 1
+            else ""
+        )
+        return (
+            f'You said: "{asked}". I am the built-in mock provider — I echo your message '
+            f"instead of answering it, so the whole system (SDK capture, Kafka pipeline, "
+            f"dashboards) is demoable with zero API keys.{turn} Add GROQ_API_KEY, "
+            f"GEMINI_API_KEY or ANTHROPIC_API_KEY to your .env and pick that provider above "
+            f"for real model responses. Meanwhile, one thing this system does: {note}"
+        )
 
     async def stream(self, model, messages, *, session_id, end_user_id):
         prompt = messages[-1]["content"] if messages else ""
@@ -171,8 +190,7 @@ class MockAdapter(Adapter):
             await asyncio.sleep(0.3)
             if "trigger error" in prompt.lower():
                 raise ProviderError("simulated provider outage (mock)")
-            digest = int(hashlib.sha1(prompt.encode()).hexdigest(), 16)
-            reply = MOCK_REPLIES[digest % len(MOCK_REPLIES)]
+            reply = self._reply(prompt, sum(1 for m in messages if m["role"] == "user"))
             words = reply.split(" ")
             for i, word in enumerate(words):
                 gen.first_chunk()
