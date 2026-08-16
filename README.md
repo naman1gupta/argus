@@ -34,10 +34,15 @@ cp .env.example .env
 docker compose up --build
 ```
 
-Then open **http://localhost:3000**. Log in and explore — the built-in **mock provider**
-works with zero API keys, so every feature below is demoable immediately.
-Optional: put `GROQ_API_KEY` / `GEMINI_API_KEY` / `ANTHROPIC_API_KEY` into `.env`
-(both Groq and Gemini have free tiers) and real providers light up in the chat.
+Then open **http://localhost:3000**. Log in and explore — every feature below works
+with zero API keys.
+
+The default **mock provider deliberately echoes your message rather than answering it**:
+it exists so the full system (SDK capture → Kafka → dashboards) is demoable without
+credentials, not to be a chatbot. For real model responses, put `GROQ_API_KEY`,
+`GEMINI_API_KEY` or `ANTHROPIC_API_KEY` into `.env` (Groq and Gemini both have free
+tiers) and pick that provider in the chat's model selector — the same SDK instrumentation
+captures all of them.
 
 | Login | Password | Role |
 |---|---|---|
