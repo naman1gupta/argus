@@ -104,7 +104,7 @@ class GroqAdapter(Adapter):
 
 class GeminiAdapter(Adapter):
     name, label = "gcp.gemini", "Google Gemini"
-    models = ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
+    models = ["gemini-flash-latest", "gemini-3-flash-preview", "gemini-3.1-flash-lite"]
 
     def available(self):
         return bool(settings.GEMINI_API_KEY)

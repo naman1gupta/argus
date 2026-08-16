@@ -1,0 +1,131 @@
+# Kubernetes manifests for the three Argus services.
+# Assumes managed Postgres and Kafka (or in-cluster operators) — their endpoints
+# are injected via the `argus-config` ConfigMap / `argus-secrets` Secret.
+# Apply: kubectl apply -f deploy/k8s/argus.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argus-config
+data:
+  DJANGO_DEBUG: "false"
+  DJANGO_ALLOWED_HOSTS: "argus.example.com,api"
+  POSTGRES_HOST: "postgres"
+  POSTGRES_DB: "argus"
+  KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
+  ARGUS_ENDPOINT: "http://argus-api:8000/api/v1"
+  INGEST_RATE_LIMIT_PER_MIN: "300"
+  PROVIDER_RATE_LIMIT_PER_MIN: "20"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: argus-secrets
+type: Opaque
+stringData:
+  DJANGO_SECRET_KEY: "change-me"
+  POSTGRES_USER: "argus"
+  POSTGRES_PASSWORD: "change-me"
+  CHAT_INGEST_KEY: "argus_sk_change-me"
+  GROQ_API_KEY: ""
+  GEMINI_API_KEY: ""
+  ANTHROPIC_API_KEY: ""
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: argus-api
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: argus-api } }
+  template:
+    metadata: { labels: { app: argus-api } }
+    spec:
+      initContainers:
+        - name: migrate
+          image: argus-server:latest
+          command: ["sh", "-c", "python manage.py migrate --noinput && python manage.py ensure_topics && python manage.py bootstrap_demo"]
+          envFrom: [{ configMapRef: { name: argus-config } }, { secretRef: { name: argus-secrets } }]
+      containers:
+        - name: api
+          image: argus-server:latest
+          command: ["uvicorn", "config.asgi:application", "--host", "0.0.0.0", "--port", "8000"]
+          ports: [{ containerPort: 8000 }]
+          envFrom: [{ configMapRef: { name: argus-config } }, { secretRef: { name: argus-secrets } }]
+          readinessProbe:
+            httpGet: { path: /api/v1/health, port: 8000 }
+            initialDelaySeconds: 5
+          resources:
+            requests: { cpu: 250m, memory: 256Mi }
+            limits: { cpu: "1", memory: 512Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: argus-api
+spec:
+  selector: { app: argus-api }
+  ports: [{ port: 8000 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: argus-worker
+spec:
+  replicas: 2   # scales horizontally up to the topic's partition count (8)
+  selector: { matchLabels: { app: argus-worker } }
+  template:
+    metadata: { labels: { app: argus-worker } }
+    spec:
+      containers:
+        - name: worker
+          image: argus-server:latest
+          command: ["python", "manage.py", "consume_events"]
+          envFrom: [{ configMapRef: { name: argus-config } }, { secretRef: { name: argus-secrets } }]
+          resources:
+            requests: { cpu: 100m, memory: 192Mi }
+            limits: { cpu: 500m, memory: 384Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: argus-frontend
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: argus-frontend } }
+  template:
+    metadata: { labels: { app: argus-frontend } }
+    spec:
+      containers:
+        - name: frontend
+          image: argus-web:latest
+          ports: [{ containerPort: 80 }]
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 200m, memory: 128Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: argus-frontend
+spec:
+  selector: { app: argus-frontend }
+  ports: [{ port: 80 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: argus
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"   # SSE
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+spec:
+  rules:
+    - host: argus.example.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend: { service: { name: argus-api, port: { number: 8000 } } }
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: argus-frontend, port: { number: 80 } } }
