@@ -1,0 +1,19 @@
+[project]
+name = "argus-sdk"
+version = "0.1.0"
+description = "Auto-instrumentation SDK that captures LLM inference telemetry and ships it to an Argus ingestion endpoint. Fail-open by design: it can never crash or block the host application."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-httpserver>=1.0"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["argus*"]
