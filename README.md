@@ -48,6 +48,13 @@ First boot runs migrations, creates topics, seeds the demo users/project, and lo
 ~6,000 realistic telemetry events (7 days, incl. a simulated error-burst incident) so
 the dashboards are alive from the first click. Demo rows are tagged `environment=demo`.
 
+## Demo video
+
+A 2½-minute silent walkthrough (captioned) is included with the submission:
+login and RBAC → dashboards → chat streaming and mid-stream cancel → the Kafka-backed
+live request tail → trace detail with PII masking → session replay → projects,
+API keys and budget alerts.
+
 ## A guided tour (what to click, in order)
 
 **1 · Log in as `admin`** — note the RBAC hint on the login screen.
