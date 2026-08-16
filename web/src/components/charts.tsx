@@ -49,9 +49,9 @@ export function RequestsChart({ data }: { data: Bucket[] }) {
           <XAxis dataKey="bucket" tickFormatter={hourTick} tick={tickStyle} minTickGap={48} axisLine={false} tickLine={false} />
           <YAxis tick={tickStyle} axisLine={false} tickLine={false} width={54} />
           <Tooltip contentStyle={tooltipStyle} labelFormatter={hourTick} />
-          <Area dataKey="ok" name="success" stroke="var(--s1)" strokeWidth={2} fill="var(--s1)" fillOpacity={0.18} />
-          <Line dataKey="err" name="error" stroke="var(--crit)" strokeWidth={1.5} dot={false} />
-          <Area dataKey="err" name="error" stroke="var(--crit)" strokeWidth={1.5} fill="none" />
+          <Area isAnimationActive={false} dataKey="ok" name="success" stroke="var(--s1)" strokeWidth={2} fill="var(--s1)" fillOpacity={0.18} />
+          <Line isAnimationActive={false} dataKey="err" name="error" stroke="var(--crit)" strokeWidth={1.5} dot={false} />
+          <Area isAnimationActive={false} dataKey="err" name="error" stroke="var(--crit)" strokeWidth={1.5} fill="none" />
         </AreaChart>
       </ResponsiveContainer>
     </>
@@ -72,9 +72,9 @@ export function LatencyChart({ data }: { data: Bucket[] }) {
             labelFormatter={hourTick}
             formatter={(v) => [`${Math.round(Number(v))} ms`]}
           />
-          <Line dataKey="p99" name="p99" stroke="var(--seq650)" strokeWidth={2} dot={false} connectNulls />
-          <Line dataKey="p95" name="p95" stroke="var(--seq450)" strokeWidth={2} dot={false} connectNulls />
-          <Line dataKey="p50" name="p50" stroke="var(--seq250)" strokeWidth={2} dot={false} connectNulls />
+          <Line isAnimationActive={false} dataKey="p99" name="p99" stroke="var(--seq650)" strokeWidth={2} dot={false} connectNulls />
+          <Line isAnimationActive={false} dataKey="p95" name="p95" stroke="var(--seq450)" strokeWidth={2} dot={false} connectNulls />
+          <Line isAnimationActive={false} dataKey="p50" name="p50" stroke="var(--seq250)" strokeWidth={2} dot={false} connectNulls />
         </LineChart>
       </ResponsiveContainer>
     </>
@@ -91,8 +91,8 @@ export function TokensChart({ data }: { data: Bucket[] }) {
           <XAxis dataKey="bucket" tickFormatter={hourTick} tick={tickStyle} minTickGap={48} axisLine={false} tickLine={false} />
           <YAxis tick={tickStyle} axisLine={false} tickLine={false} width={52} />
           <Tooltip contentStyle={tooltipStyle} labelFormatter={hourTick} />
-          <Bar dataKey="tokens_in" name="input" stackId="t" fill="var(--s1)" radius={[0, 0, 0, 0]} />
-          <Bar dataKey="tokens_out" name="output" stackId="t" fill="var(--s3)" radius={[3, 3, 0, 0]} />
+          <Bar isAnimationActive={false} dataKey="tokens_in" name="input" stackId="t" fill="var(--s1)" radius={[0, 0, 0, 0]} />
+          <Bar isAnimationActive={false} dataKey="tokens_out" name="output" stackId="t" fill="var(--s3)" radius={[3, 3, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </>
