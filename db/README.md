@@ -76,10 +76,11 @@ the trade-off is that grouping by session is an index scan rather than a join.
 | `telemetry_inferencelog_pkey` | ULID primary key |
 | `generation_id` UNIQUE | idempotent upserts (the ingestion contract) |
 | `inflog_session_time (session_id, started_at)` | session replay + per-conversation aggregates |
-| `inflog_provider_model_time (provider, request_model, started_at)` | "cost by model", model comparison, provider filters |
-| `inflog_project_time (project_id, started_at)` | tenant-scoped dashboards |
+| `inflog_model_time (provider, request_model, started_at)` | "cost by model", model comparison, provider filters |
+| `telemetry_inferencelog_project_id_*` | tenant-scoped queries (project filter) |
 | `inflog_errors_time (started_at) WHERE status='error'` | **partial index** — error dashboards touch ~2% of rows, so the index stays tiny |
-| `inflog_started_brin (started_at)` USING BRIN | **BRIN** on an append-only, time-correlated column: range scans over 7/30-day windows at a fraction of a B-tree's size |
+| `inflog_time (started_at)` | the default dashboard window filter |
+| `inflog_started_brin (started_at)` USING BRIN | **BRIN** on an append-only, time-correlated column: per-block ranges rather than per-row pointers — a fraction of a B-tree's size for 7/30-day scans |
 | `inflog_meta_gin (raw_metadata)` USING GIN `jsonb_path_ops` | containment queries on the metadata blob; `jsonb_path_ops` is smaller and faster than the default opclass (it supports `@>` but not key-existence — a deliberate trade) |
 
 ### Scale path

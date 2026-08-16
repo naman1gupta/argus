@@ -550,6 +550,11 @@ CREATE INDEX inflog_model_time ON public.telemetry_inferencelog USING btree (pro
 CREATE INDEX inflog_session_time ON public.telemetry_inferencelog USING btree (session_id, started_at);
 
 
+-- Name: inflog_started_brin; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX inflog_started_brin ON public.telemetry_inferencelog USING brin (started_at) WITH (pages_per_range='64');
+
+
 -- Name: inflog_time; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX inflog_time ON public.telemetry_inferencelog USING btree (started_at);

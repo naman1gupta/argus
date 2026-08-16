@@ -1,5 +1,5 @@
 from django.contrib.postgres.fields import ArrayField
-from django.contrib.postgres.indexes import GinIndex
+from django.contrib.postgres.indexes import BrinIndex, GinIndex
 from django.db import models
 
 from apps.chat.models import new_ulid
@@ -92,6 +92,10 @@ class InferenceLog(models.Model):
                 name="inflog_errors_time",
                 condition=models.Q(status="error"),
             ),
+            # Append-only, time-correlated column: BRIN stores per-block ranges
+            # instead of per-row pointers — a fraction of a B-tree's size for the
+            # 7/30-day range scans the dashboards run.
+            BrinIndex(fields=["started_at"], name="inflog_started_brin", pages_per_range=64),
             GinIndex(
                 fields=["raw_metadata"], name="inflog_meta_gin", opclasses=["jsonb_path_ops"]
             ),
