@@ -128,8 +128,10 @@ mobile widths (hamburger nav, scrollable tables).
 sdk/       argus-sdk — pip-installable Python SDK (own test suite)
 server/    Django 5 + Django Ninja — chat, ingestion, insights APIs, Kafka consumer
 web/       React 19 + TypeScript + Tailwind + React Query + Recharts
-docs/      ARCHITECTURE.md · SCHEMA.md · DECISIONS.md (ADRs)
+db/        schema.sql (full DDL) + index/design rationale
+docs/      ARCHITECTURE.md · SCHEMA.md · DECISIONS.md (ADRs) · MODELS.md
 deploy/    Kubernetes manifests
+scripts/   burst_demo.py — throughput + idempotency proof
 ```
 
 One codebase, three runtime services: **api** (ASGI), **worker** (Kafka consumer),
@@ -206,10 +208,38 @@ the postgres Service, clobbering the app's own env var), and the API readiness p
 is an exec probe sending an explicit `Host` header, so `ALLOWED_HOSTS` stays strict
 instead of being widened to accept the kubelet's pod-IP requests.
 
+## Database
+
+PostgreSQL 17, schema owned by Django migrations (applied automatically on start).
+
+- **[db/schema.sql](db/schema.sql)** — the complete DDL exported with `pg_dump --schema-only`:
+  tables, constraints and every index, applyable directly with `psql -f`.
+- **[db/README.md](db/README.md)** — why the schema looks the way it does: hybrid
+  typed-columns + JSONB, ULID primary keys, the `generation_id` idempotency key,
+  `NUMERIC` money, nullable telemetry, and each index (including a **partial**
+  index for errors, a **BRIN** index on the append-only timestamp, and a **GIN**
+  `jsonb_path_ops` index on metadata).
+- **[server/apps/*/migrations/](server/apps)** — the versioned migration history.
+
+```bash
+docker compose exec api python manage.py sqlmigrate telemetry 0001   # see the SQL a migration runs
+docker compose exec postgres psql -U argus -c '\d telemetry_inferencelog'
+```
+
+## Model providers
+
+Groq, Google Gemini, Anthropic, OpenAI and xAI (Grok) are implemented behind one
+adapter interface, plus a keyless mock. **Default: `groq` / `llama-3.3-70b-versatile`**
+(configurable via `DEFAULT_PROVIDER` / `DEFAULT_MODEL`, falls back to `mock` when
+no key is present). Full matrix, the paid-key disclaimer and how to add a provider:
+**[docs/MODELS.md](docs/MODELS.md)**.
+
 ## Design notes
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — ingestion flow, SDK internals, streaming mechanics
 - [docs/SCHEMA.md](docs/SCHEMA.md) — schema rationale, indexing, scale path
+- [db/README.md](db/README.md) — DDL, indexes and production-database notes
+- [docs/MODELS.md](docs/MODELS.md) — providers, default model, cost attribution
 - [docs/DECISIONS.md](docs/DECISIONS.md) — ADRs: Kafka vs Redis Streams vs Celery, Ninja vs DRF, Postgres vs ClickHouse, 207 multi-status, fail-open trade-offs, masking placement, and what changes at 100× scale
 
 ## What I'd improve with more time

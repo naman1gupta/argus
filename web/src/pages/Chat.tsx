@@ -7,7 +7,8 @@ import { StatusPill } from '../components/ui'
 
 type SessionRow = { id: string; title: string; updated_at: string; message_count: number }
 type Msg = { role: string; content: string; provider?: string; model?: string; streaming?: boolean; error?: string; aborted?: boolean }
-type Provider = { name: string; label: string; models: string[]; available: boolean }
+type Provider = { name: string; label: string; models: string[]; available: boolean; is_default: boolean }
+type ProvidersResponse = { providers: Provider[]; default: { provider: string; model: string } }
 
 export default function Chat() {
   const { me } = useAuth()
@@ -16,12 +17,23 @@ export default function Chat() {
   const [msgs, setMsgs] = useState<Msg[]>([])
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
-  const [pm, setPm] = useState('mock::argus-demo-1')
+  const [pm, setPm] = useState('')
   const abortRef = useRef<AbortController | null>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
 
   const sessions = useQuery({ queryKey: ['sessions'], queryFn: () => api<SessionRow[]>('/chat/sessions') })
-  const providers = useQuery({ queryKey: ['providers'], queryFn: () => api<Provider[]>('/chat/providers') })
+  const providersQuery = useQuery({
+    queryKey: ['providers'],
+    queryFn: () => api<ProvidersResponse>('/chat/providers'),
+  })
+  const providers = { data: providersQuery.data?.providers }
+
+  // Default provider/model comes from the server (DEFAULT_PROVIDER / DEFAULT_MODEL),
+  // falling back to the keyless mock when that provider has no key configured.
+  useEffect(() => {
+    const d = providersQuery.data?.default
+    if (d && !pm) setPm(`${d.provider}::${d.model}`)
+  }, [providersQuery.data, pm])
 
   const loadSession = async (id: string) => {
     setSessionId(id)

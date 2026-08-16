@@ -28,9 +28,12 @@ def test_chat_requires_login(client):
 
 @pytest.mark.django_db
 def test_providers_lists_mock_always(logged_in):
-    provs = {p["name"]: p for p in logged_in.get("/api/v1/chat/providers").json()}
+    body = logged_in.get("/api/v1/chat/providers").json()
+    provs = {p["name"]: p for p in body["providers"]}
     assert provs["mock"]["available"] is True
-    assert set(provs) == {"anthropic", "gcp.gemini", "groq", "mock"}
+    assert set(provs) == {"anthropic", "gcp.gemini", "groq", "openai", "xai", "mock"}
+    # with no provider keys configured in tests, the default falls back to mock
+    assert body["default"] == {"provider": "mock", "model": "argus-demo-1"}
 
 
 @pytest.mark.django_db

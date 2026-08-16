@@ -10,7 +10,12 @@ from ninja.errors import HttpError
 
 from apps.accounts.security import session_auth
 from apps.chat.models import Message, Session
-from apps.chat.providers import ADAPTERS, ProviderError, available_providers
+from apps.chat.providers import (
+    ADAPTERS,
+    ProviderError,
+    available_providers,
+    default_selection,
+)
 from apps.projects.models import Project
 from apps.telemetry.ratelimit import SlidingWindowLimiter
 
@@ -49,7 +54,11 @@ class SendIn(Schema):
 
 @router.get("/providers")
 def providers(request):
-    return available_providers()
+    provider, model = default_selection()
+    return {
+        "providers": available_providers(),
+        "default": {"provider": provider, "model": model},
+    }
 
 
 @router.get("/sessions", response=list[SessionOut])

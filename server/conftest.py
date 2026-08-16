@@ -7,6 +7,11 @@ from apps.projects.models import Project
 @pytest.fixture(autouse=True)
 def _argus_disabled(settings):
     settings.ARGUS_DISABLED = True
+    settings.GROQ_API_KEY = ""
+    settings.GEMINI_API_KEY = ""
+    settings.ANTHROPIC_API_KEY = ""
+    settings.OPENAI_API_KEY = ""
+    settings.XAI_API_KEY = ""
 
 
 @pytest.fixture

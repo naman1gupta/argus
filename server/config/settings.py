@@ -100,6 +100,12 @@ ARGUS_DISABLED = env_bool("ARGUS_DISABLED", False)
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+XAI_API_KEY = os.environ.get("XAI_API_KEY", "")
+
+# Provider/model the chat UI selects on first load.
+DEFAULT_PROVIDER = os.environ.get("DEFAULT_PROVIDER", "groq")
+DEFAULT_MODEL = os.environ.get("DEFAULT_MODEL", "llama-3.3-70b-versatile")
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 

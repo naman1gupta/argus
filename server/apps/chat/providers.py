@@ -72,21 +72,27 @@ class AnthropicAdapter(Adapter):
                     yield text
 
 
-class GroqAdapter(Adapter):
-    name, label = "groq", "Groq"
-    models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
-    base_url = "https://api.groq.com/openai/v1"
+class OpenAICompatibleAdapter(Adapter):
+    """Any endpoint speaking the OpenAI Chat Completions protocol — Groq, xAI,
+    OpenAI itself, vLLM, Together. Adding one is a subclass with a base_url."""
+
+    base_url: str
+    api_key_setting: str
+
+    @property
+    def api_key(self) -> str:
+        return getattr(settings, self.api_key_setting, "")
 
     def available(self):
-        return bool(settings.GROQ_API_KEY)
+        return bool(self.api_key)
 
     def _client(self):
         import openai
 
         return argus.wrap_openai(
-            openai.AsyncOpenAI(api_key=settings.GROQ_API_KEY, base_url=self.base_url),
+            openai.AsyncOpenAI(api_key=self.api_key, base_url=self.base_url),
             get_argus(),
-            provider="groq",
+            provider=self.name,
         )
 
     async def stream(self, model, messages, *, session_id, end_user_id):
@@ -100,6 +106,27 @@ class GroqAdapter(Adapter):
             choices = getattr(chunk, "choices", None) or []
             if choices and getattr(choices[0].delta, "content", None):
                 yield choices[0].delta.content
+
+
+class GroqAdapter(OpenAICompatibleAdapter):
+    name, label = "groq", "Groq"
+    models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+    base_url = "https://api.groq.com/openai/v1"
+    api_key_setting = "GROQ_API_KEY"
+
+
+class OpenAIAdapter(OpenAICompatibleAdapter):
+    name, label = "openai", "OpenAI"
+    models = ["gpt-5.4-mini", "gpt-5.4"]
+    base_url = "https://api.openai.com/v1"
+    api_key_setting = "OPENAI_API_KEY"
+
+
+class XAIAdapter(OpenAICompatibleAdapter):
+    name, label = "xai", "xAI (Grok)"
+    models = ["grok-4", "grok-4-fast"]
+    base_url = "https://api.x.ai/v1"
+    api_key_setting = "XAI_API_KEY"
 
 
 class GeminiAdapter(Adapter):
@@ -215,13 +242,36 @@ class MockAdapter(Adapter):
             raise
 
 
+# Order matters: this is the order shown in the model picker.
 ADAPTERS: dict[str, Adapter] = {
-    a.name: a for a in (AnthropicAdapter(), GeminiAdapter(), GroqAdapter(), MockAdapter())
+    a.name: a
+    for a in (
+        GroqAdapter(),       # free tier — default provider
+        GeminiAdapter(),     # free tier
+        AnthropicAdapter(),  # paid
+        OpenAIAdapter(),     # paid
+        XAIAdapter(),        # paid
+        MockAdapter(),       # no key required
+    )
 }
 
 
 def available_providers() -> list[dict]:
     return [
-        {"name": a.name, "label": a.label, "models": a.models, "available": a.available()}
+        {
+            "name": a.name,
+            "label": a.label,
+            "models": a.models,
+            "available": a.available(),
+            "is_default": a.name == settings.DEFAULT_PROVIDER,
+        }
         for a in ADAPTERS.values()
     ]
+
+
+def default_selection() -> tuple[str, str]:
+    """Configured default, falling back to mock when its key is absent."""
+    adapter = ADAPTERS.get(settings.DEFAULT_PROVIDER)
+    if adapter and adapter.available() and settings.DEFAULT_MODEL in adapter.models:
+        return adapter.name, settings.DEFAULT_MODEL
+    return "mock", "argus-demo-1"
