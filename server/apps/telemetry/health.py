@@ -25,14 +25,19 @@ async def consumer_lag() -> int | None:
         if not tps:
             return 0
         end = await consumer.end_offsets(tps)
+        beginning = await consumer.beginning_offsets(tps)
         committed = await admin.list_consumer_group_offsets(
             settings.KAFKA_CONSUMER_GROUP, partitions=tps
         )
         lag = 0
         for tp in tps:
             meta = committed.get(tp)
-            if meta is not None and meta.offset >= 0:
-                lag += max(end[tp] - meta.offset, 0)
+            # No committed offset yet (new partition, or the group never got
+            # this far) means nothing has been consumed — the whole partition
+            # is backlog. Skipping it would under-report lag to zero, which is
+            # exactly the case an operator needs to see.
+            position = meta.offset if meta is not None and meta.offset >= 0 else beginning[tp]
+            lag += max(end[tp] - position, 0)
         return lag
     except Exception as exc:
         log.warning("consumer lag unavailable: %s", exc)
