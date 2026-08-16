@@ -51,12 +51,13 @@ def _prompt_from_contents(contents) -> str:
 
 
 def _start(argus_client, kwargs, gen_ctx, streaming):
+    ctx = {**gen_ctx, **kwargs.pop("argus_context", {})}
     return argus_client.generation(
         "gcp.gemini",
         kwargs.get("model", "unknown"),
         is_streaming=streaming,
         prompt=_prompt_from_contents(kwargs.get("contents")),
-        **gen_ctx,
+        **ctx,
     )
 
 

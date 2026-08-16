@@ -23,7 +23,9 @@ class Command(BaseCommand):
 
         if not Project.objects.exists():
             project = Project(name="default", environment="production")
-            raw_key = project.issue_key()
+            # CHAT_INGEST_KEY provisions a known key so the bundled chat app can
+            # dogfood the SDK; only its hash is stored, and it can be rotated.
+            raw_key = project.issue_key(os.environ.get("CHAT_INGEST_KEY") or None)
             project.save()
             self.stdout.write("created project 'default' — ingestion key (shown once):")
             self.stdout.write(self.style.SUCCESS(raw_key))

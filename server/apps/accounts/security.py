@@ -1,10 +1,21 @@
 from django.http import HttpRequest
+from ninja.security import SessionAuth
 
 
-def session_auth(request: HttpRequest):
-    return request.user if request.user.is_authenticated else None
+class _SessionAuth(SessionAuth):
+    """Session-cookie auth with Ninja's CSRF enforcement (csrf=True in base)."""
+
+    def authenticate(self, request: HttpRequest, key):
+        return request.user if request.user.is_authenticated else None
 
 
-def admin_auth(request: HttpRequest):
-    u = request.user
-    return u if (u.is_authenticated and getattr(u, "is_admin", False)) else None
+class _AdminAuth(SessionAuth):
+    def authenticate(self, request: HttpRequest, key):
+        user = request.user
+        if user.is_authenticated and getattr(user, "is_admin", False):
+            return user
+        return None
+
+
+session_auth = _SessionAuth()
+admin_auth = _AdminAuth()

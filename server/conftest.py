@@ -4,6 +4,11 @@ from django.contrib.auth import get_user_model
 from apps.projects.models import Project
 
 
+@pytest.fixture(autouse=True)
+def _argus_disabled(settings):
+    settings.ARGUS_DISABLED = True
+
+
 @pytest.fixture
 def project(db):
     p = Project(name="test-project")

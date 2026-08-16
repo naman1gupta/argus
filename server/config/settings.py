@@ -92,6 +92,15 @@ KAFKA_CONSUMER_GROUP = os.environ.get("KAFKA_CONSUMER_GROUP", "argus-persister")
 INGEST_RATE_LIMIT_PER_MIN = int(os.environ.get("INGEST_RATE_LIMIT_PER_MIN", "300"))
 PROVIDER_RATE_LIMIT_PER_MIN = int(os.environ.get("PROVIDER_RATE_LIMIT_PER_MIN", "20"))
 
+# The bundled chat app is itself an SDK consumer (dogfooding).
+ARGUS_ENDPOINT = os.environ.get("ARGUS_ENDPOINT", "http://localhost:8000/api/v1")
+CHAT_INGEST_KEY = os.environ.get("CHAT_INGEST_KEY", "argus_sk_dev-chat-key-change-me")
+ARGUS_DISABLED = env_bool("ARGUS_DISABLED", False)
+
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 USE_TZ = True

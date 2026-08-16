@@ -26,13 +26,16 @@ def wrap_anthropic(client, argus_client=None, **gen_ctx):
 
 
 def _start(argus_client, kwargs, gen_ctx):
+    # argus_context: per-call overrides (session_id, end_user_id) popped
+    # before the kwargs reach the provider SDK.
+    ctx = {**gen_ctx, **kwargs.pop("argus_context", {})}
     return argus_client.generation(
         "anthropic",
         kwargs.get("model", "unknown"),
         is_streaming=bool(kwargs.get("stream")),
         prompt=extract_prompt(kwargs.get("messages")),
         request_params=pick_params(kwargs),
-        **gen_ctx,
+        **ctx,
     )
 
 

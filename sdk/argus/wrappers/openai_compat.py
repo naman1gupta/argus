@@ -24,13 +24,14 @@ def wrap_openai(client, argus_client=None, provider: str = "openai", **gen_ctx):
 
 
 def _start(argus_client, provider, kwargs, gen_ctx):
+    ctx = {**gen_ctx, **kwargs.pop("argus_context", {})}
     return argus_client.generation(
         provider,
         kwargs.get("model", "unknown"),
         is_streaming=bool(kwargs.get("stream")),
         prompt=extract_prompt(kwargs.get("messages")),
         request_params=pick_params(kwargs),
-        **gen_ctx,
+        **ctx,
     )
 
 

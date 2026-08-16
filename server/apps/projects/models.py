@@ -29,9 +29,9 @@ class Project(models.Model):
     class Meta:
         ordering = ["created_at"]
 
-    def issue_key(self) -> str:
+    def issue_key(self, raw: str | None = None) -> str:
         """Generates a new ingestion key; only the hash is stored. Returns the raw key once."""
-        raw = KEY_PREFIX + secrets.token_urlsafe(32)
+        raw = raw or (KEY_PREFIX + secrets.token_urlsafe(32))
         self.key_hash = hash_key(raw)
         self.key_hint = f"{raw[:12]}…{raw[-4:]}"
         return raw
