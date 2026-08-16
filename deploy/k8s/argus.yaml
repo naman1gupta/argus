@@ -1,14 +1,22 @@
-# Kubernetes manifests for the three Argus services.
-# Assumes managed Postgres and Kafka (or in-cluster operators) — their endpoints
-# are injected via the `argus-config` ConfigMap / `argus-secrets` Secret.
-# Apply: kubectl apply -f deploy/k8s/argus.yaml
+# Self-contained Kubernetes deployment of Argus: the three app services plus
+# single-node Postgres and Kafka (KRaft) for a self-hosted cluster.
+#
+# Verified on a local kind cluster:
+#   kind create cluster --name argus
+#   docker compose build                      # produces argus-api / argus-frontend
+#   kind load docker-image argus-api argus-frontend --name argus
+#   kubectl apply -f deploy/k8s/argus.yaml
+#   kubectl port-forward svc/argus-frontend 8080:80   # → http://localhost:8080
+#
+# Demo sizing: 1 replica each, emptyDir storage. Production notes inline.
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: argus-config
 data:
   DJANGO_DEBUG: "false"
-  DJANGO_ALLOWED_HOSTS: "argus.example.com,api"
+  DJANGO_ALLOWED_HOSTS: "argus-api,localhost,127.0.0.1,api,argus.example.com"
+  CSRF_TRUSTED_ORIGINS: "http://localhost:8080,http://localhost:3000,https://argus.example.com"
   POSTGRES_HOST: "postgres"
   POSTGRES_DB: "argus"
   KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
@@ -24,36 +32,128 @@ type: Opaque
 stringData:
   DJANGO_SECRET_KEY: "change-me"
   POSTGRES_USER: "argus"
-  POSTGRES_PASSWORD: "change-me"
+  POSTGRES_PASSWORD: "change-me-too"
   CHAT_INGEST_KEY: "argus_sk_change-me"
+  DEMO_ADMIN_PASSWORD: "argus-admin"
+  DEMO_MEMBER_PASSWORD: "argus-member"
   GROQ_API_KEY: ""
   GEMINI_API_KEY: ""
   ANTHROPIC_API_KEY: ""
 ---
+# ---------- Postgres (single node; use a managed DB or an operator in prod) ----------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: postgres } }
+  template:
+    metadata: { labels: { app: postgres } }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17-alpine
+          env:
+            - name: POSTGRES_USER
+              valueFrom: { secretKeyRef: { name: argus-secrets, key: POSTGRES_USER } }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: argus-secrets, key: POSTGRES_PASSWORD } }
+            - name: POSTGRES_DB
+              valueFrom: { configMapKeyRef: { name: argus-config, key: POSTGRES_DB } }
+          ports: [{ containerPort: 5432 }]
+          volumeMounts: [{ name: data, mountPath: /var/lib/postgresql/data }]
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "argus"] }
+            initialDelaySeconds: 3
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 512Mi }
+      volumes: [{ name: data, emptyDir: {} }]   # PVC in production
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+spec:
+  selector: { app: postgres }
+  ports: [{ port: 5432 }]
+---
+# ---------- Kafka, single-node KRaft (use Strimzi/MSK in prod) ----------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: kafka } }
+  template:
+    metadata: { labels: { app: kafka } }
+    spec:
+      containers:
+        - name: kafka
+          image: apache/kafka:4.0.0
+          env:
+            - { name: KAFKA_NODE_ID, value: "1" }
+            - { name: KAFKA_PROCESS_ROLES, value: "broker,controller" }
+            - { name: KAFKA_CONTROLLER_QUORUM_VOTERS, value: "1@localhost:9093" }
+            - { name: KAFKA_LISTENERS, value: "PLAINTEXT://:9092,CONTROLLER://:9093" }
+            - { name: KAFKA_ADVERTISED_LISTENERS, value: "PLAINTEXT://kafka:9092" }
+            - { name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP, value: "PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT" }
+            - { name: KAFKA_CONTROLLER_LISTENER_NAMES, value: "CONTROLLER" }
+            - { name: KAFKA_INTER_BROKER_LISTENER_NAME, value: "PLAINTEXT" }
+            - { name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR, value: "1" }
+            - { name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR, value: "1" }
+            - { name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR, value: "1" }
+            - { name: KAFKA_AUTO_CREATE_TOPICS_ENABLE, value: "false" }
+          ports: [{ containerPort: 9092 }]
+          readinessProbe:
+            tcpSocket: { port: 9092 }
+            initialDelaySeconds: 10
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            limits: { cpu: "1", memory: 1Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+spec:
+  selector: { app: kafka }
+  ports: [{ port: 9092 }]
+---
+# ---------- Argus API ----------
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: argus-api
 spec:
-  replicas: 2
+  replicas: 1   # scale horizontally in prod; sessions are DB-backed
   selector: { matchLabels: { app: argus-api } }
   template:
     metadata: { labels: { app: argus-api } }
     spec:
+      enableServiceLinks: false   # k8s injects POSTGRES_PORT=tcp://... for the postgres Service, clobbering our env
       initContainers:
         - name: migrate
-          image: argus-server:latest
-          command: ["sh", "-c", "python manage.py migrate --noinput && python manage.py ensure_topics && python manage.py bootstrap_demo"]
+          image: argus-api:latest
+          imagePullPolicy: Never   # kind-loaded local image; use a registry in prod
+          command: ["sh", "-c", "python manage.py migrate --noinput && python manage.py ensure_topics && python manage.py bootstrap_demo && python manage.py seed_demo"]
           envFrom: [{ configMapRef: { name: argus-config } }, { secretRef: { name: argus-secrets } }]
       containers:
         - name: api
-          image: argus-server:latest
+          image: argus-api:latest
+          imagePullPolicy: Never
           command: ["uvicorn", "config.asgi:application", "--host", "0.0.0.0", "--port", "8000"]
           ports: [{ containerPort: 8000 }]
           envFrom: [{ configMapRef: { name: argus-config } }, { secretRef: { name: argus-secrets } }]
           readinessProbe:
-            httpGet: { path: /api/v1/health, port: 8000 }
+            # kubelet probes the pod IP as Host; exec-probe with an explicit
+            # Host header keeps ALLOWED_HOSTS strict instead of widening it.
+            exec:
+              command: ["python", "-c", "import urllib.request as u; u.urlopen(u.Request('http://127.0.0.1:8000/api/v1/health', headers={'Host': 'localhost'}))"]
             initialDelaySeconds: 5
+            periodSeconds: 10
           resources:
             requests: { cpu: 250m, memory: 256Mi }
             limits: { cpu: "1", memory: 512Mi }
@@ -66,39 +166,58 @@ spec:
   selector: { app: argus-api }
   ports: [{ port: 8000 }]
 ---
+# Alias so the frontend image's nginx upstream (`api`, the compose service name)
+# resolves identically in-cluster — one image runs unmodified in both worlds.
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+spec:
+  selector: { app: argus-api }
+  ports: [{ port: 8000 }]
+---
+# ---------- Kafka consumer worker ----------
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: argus-worker
 spec:
-  replicas: 2   # scales horizontally up to the topic's partition count (8)
+  replicas: 1   # scales to the topic's partition count (8)
   selector: { matchLabels: { app: argus-worker } }
   template:
     metadata: { labels: { app: argus-worker } }
     spec:
+      enableServiceLinks: false   # k8s injects POSTGRES_PORT=tcp://... for the postgres Service, clobbering our env
       containers:
         - name: worker
-          image: argus-server:latest
+          image: argus-api:latest
+          imagePullPolicy: Never
           command: ["python", "manage.py", "consume_events"]
           envFrom: [{ configMapRef: { name: argus-config } }, { secretRef: { name: argus-secrets } }]
           resources:
             requests: { cpu: 100m, memory: 192Mi }
             limits: { cpu: 500m, memory: 384Mi }
 ---
+# ---------- Frontend (nginx + SPA, proxies /api to argus-api) ----------
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: argus-frontend
 spec:
-  replicas: 2
+  replicas: 1
   selector: { matchLabels: { app: argus-frontend } }
   template:
     metadata: { labels: { app: argus-frontend } }
     spec:
+      enableServiceLinks: false   # k8s injects POSTGRES_PORT=tcp://... for the postgres Service, clobbering our env
       containers:
         - name: frontend
-          image: argus-web:latest
+          image: argus-frontend:latest
+          imagePullPolicy: Never
           ports: [{ containerPort: 80 }]
+          readinessProbe:
+            httpGet: { path: /, port: 80 }
+            initialDelaySeconds: 3
           resources:
             requests: { cpu: 50m, memory: 64Mi }
             limits: { cpu: 200m, memory: 128Mi }
@@ -111,6 +230,7 @@ spec:
   selector: { app: argus-frontend }
   ports: [{ port: 80 }]
 ---
+# ---------- Ingress (requires an ingress controller; port-forward works without) ----------
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:

@@ -105,7 +105,8 @@ mobile widths (hamburger nav, scrollable tables).
 | **Bonus** monitoring dashboards | Dashboard page: percentiles, cost, tokens, errors, risk signals |
 | **Bonus** event-driven pattern | Kafka (KRaft), partition-by-session ordering, manual commits, DLQ, degraded direct-write mode |
 | **Bonus** sensitive-data masking | Regex + checksum (Luhn, Verhoeff) masking in the SDK before egress; queryable `pii_entities_found` |
-| **Bonus** containerized deployment | `docker-compose.yml` (5 services); Kubernetes manifests in `deploy/k8s` |
+| **Bonus** containerized deployment | `docker-compose.yml` (5 services) |
+| **Bonus** Kubernetes deployment | `deploy/k8s/argus.yaml` — **verified running on a local kind cluster** (app + Postgres + Kafka, 5 pods); steps below |
 | Extras | Auth + RBAC, per-project hashed API keys, rate limiting (ingestion + provider), cost budget alerts, evidence CSV export, live tail, seeded demo data, light/dark, responsive |
 
 ## Repository layout
@@ -168,6 +169,29 @@ python scripts/burst_demo.py --events 2000 --key argus_sk_dev-chat-key-change-me
   `POSTGRES_HOST_PORT=5433 KAFKA_HOST_PORT=29093 docker compose up`.
 - **Reset everything** (fresh DB + reseed): `docker compose down -v && docker compose up`.
 - **Watch the pipeline**: `docker compose logs -f worker` while you chat.
+
+## Run it on Kubernetes (self-hosted)
+
+Verified end-to-end on a local [kind](https://kind.sigs.k8s.io) cluster — the same
+manifests target any cluster (swap `imagePullPolicy: Never` for a registry, and the
+emptyDir volumes for PVCs).
+
+```bash
+kind create cluster --name argus
+docker compose build                                            # builds argus-api / argus-frontend
+kind load docker-image argus-api:latest argus-frontend:latest --name argus
+kubectl apply -f deploy/k8s/argus.yaml
+kubectl rollout status deploy/argus-api
+kubectl port-forward svc/argus-frontend 8080:80                 # → http://localhost:8080
+```
+
+Deploys 5 pods: `argus-api` (ASGI, with a migrate/seed init container), `argus-worker`
+(Kafka consumer), `argus-frontend` (nginx + SPA), plus single-node `postgres` and
+`kafka`. Two details worth noting — both real bugs found while verifying: pods set
+`enableServiceLinks: false` (Kubernetes otherwise injects `POSTGRES_PORT=tcp://…` for
+the postgres Service, clobbering the app's own env var), and the API readiness probe
+is an exec probe sending an explicit `Host` header, so `ALLOWED_HOSTS` stays strict
+instead of being widened to accept the kubelet's pod-IP requests.
 
 ## Design notes
 
