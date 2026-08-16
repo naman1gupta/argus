@@ -204,12 +204,3 @@ instead of being widened to accept the kubelet's pod-IP requests.
 Documented as future work rather than half-built: Google OAuth, Prometheus `/metrics` +
 Grafana, alerting channels (Slack/email), retention policies, OTLP export, sampling
 controls, table partitioning → ClickHouse at scale. Details in DECISIONS.md.
-
-## On AI usage
-
-This project was built AI-assisted (Claude), with every architectural decision —
-the Kafka topology, the two-phase event model, the fail-open SDK contract, the
-schema and its indexes — made and reviewed deliberately; the ADRs in
-[docs/DECISIONS.md](docs/DECISIONS.md) are the record of that reasoning. For a company
-insuring AI systems, disciplined human-in-the-loop AI development felt like the only
-honest way to build the take-home.
