@@ -25,7 +25,11 @@
 
 ## Run it (Docker, no API keys needed)
 
+The only prerequisite is Docker (Desktop or any engine with compose v2) — no local
+Python, Node, Kafka, or Postgres required.
+
 ```bash
+git clone https://github.com/naman1gupta/argus.git && cd argus
 cp .env.example .env
 docker compose up --build
 ```
@@ -151,13 +155,21 @@ cd sdk && ../server/.venv/bin/python -m pytest # sdk suite
 
 Interactive API docs (Swagger) at **http://localhost:8000/api/v1/docs**.
 
+## Troubleshooting
+
+- **Port already in use**: the app uses 3000 (UI) and 8000 (API). Postgres/Kafka host
+  ports are only for host-based dev and can be remapped without touching the app:
+  `POSTGRES_HOST_PORT=5433 KAFKA_HOST_PORT=29093 docker compose up`.
+- **Reset everything** (fresh DB + reseed): `docker compose down -v && docker compose up`.
+- **Watch the pipeline**: `docker compose logs -f worker` while you chat.
+
 ## Design notes
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — ingestion flow, SDK internals, streaming mechanics
 - [docs/SCHEMA.md](docs/SCHEMA.md) — schema rationale, indexing, scale path
 - [docs/DECISIONS.md](docs/DECISIONS.md) — ADRs: Kafka vs Redis Streams vs Celery, Ninja vs DRF, Postgres vs ClickHouse, 207 multi-status, fail-open trade-offs, masking placement, and what changes at 100× scale
 
-## Deliberate scope (and what I'd do next)
+## What I'd improve with more time
 
 Documented as future work rather than half-built: Google OAuth, Prometheus `/metrics` +
 Grafana, alerting channels (Slack/email), retention policies, OTLP export, sampling

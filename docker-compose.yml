@@ -3,12 +3,13 @@ name: argus
 services:
   postgres:
     image: postgres:17-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: argus
       POSTGRES_PASSWORD: argus
       POSTGRES_DB: argus
     ports:
-      - "5432:5432"
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -19,8 +20,9 @@ services:
 
   kafka:
     image: apache/kafka:4.0.0
+    restart: unless-stopped
     ports:
-      - "29092:29092"
+      - "${KAFKA_HOST_PORT:-29092}:29092"
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
@@ -46,6 +48,7 @@ services:
     build:
       context: .
       dockerfile: server/Dockerfile
+    restart: unless-stopped
     command: >
       sh -c "python manage.py migrate --noinput &&
              python manage.py ensure_topics &&
@@ -74,6 +77,7 @@ services:
     build:
       context: .
       dockerfile: server/Dockerfile
+    restart: unless-stopped
     command: python manage.py consume_events
     env_file: .env
     environment:
@@ -89,6 +93,7 @@ services:
 
   frontend:
     build: ./web
+    restart: unless-stopped
     ports:
       - "3000:80"
     depends_on:

@@ -99,7 +99,41 @@ middleware is deliberately absent — it buffers streaming responses.
   (20/min) — the latter also caps spend against free-tier quotas.
 - **Budgets:** monthly USD budget per project; dashboard banners at 80% and 100%.
 
-## 5 · Operational notes
+## 5 · Failure handling assumptions
+
+What breaks, what happens, what is lost — stated explicitly:
+
+| Failure | Behavior | Data impact |
+|---|---|---|
+| Ingestion API unreachable from SDK | SDK retries ×3 w/ backoff, then drops the batch, logs, keeps counting drops; host app never notices | up to one batch per retry cycle lost (bounded, observable) |
+| Host app crashes | in-memory SDK buffer dies with it | ≤10k buffered events (≈ the last second of traffic) |
+| Kafka down | api falls back to synchronous Postgres writes (`mode: "direct"` in the response, warning logged) | none; latency of ingestion responses rises |
+| Worker down / crashing | events accumulate in Kafka (7-day retention); `/health` consumer_lag climbs — visible in the UI footer | none; persistence delayed until worker returns (offsets committed only after writes) |
+| Poison event (persist raises) | 3 attempts → dead-lettered to `inference_events.dlq` with the error, offset committed | none lost; quarantined for inspection |
+| Duplicate delivery (at-least-once, retries, replays) | unique `generation_id` + deterministic end-merge ⇒ replay-safe | none; proven by `scripts/burst_demo.py` |
+| Provider stream aborted mid-flight | wrapper records `aborted`, estimates usage, sets `tokens_estimated=true` | none; flagged rather than guessed |
+| Postgres down | the one non-degradable dependency: ingestion 500s (Kafka path still accepts + buffers), chat/api unavailable | events already in Kafka wait; SDK-side events retry/drop as above |
+
+Trust model: the SDK is untrusted input — everything is re-validated at ingestion;
+keys are hashed; telemetry rows are project-scoped.
+
+## 6 · Scaling considerations
+
+Designed-in headroom, in the order it would be used:
+
+1. **api**: stateless → horizontal replicas behind a load balancer (session auth uses
+   DB-backed sessions; the rate limiter becomes Redis-backed at >1 replica — ADR-9).
+2. **worker**: scale replicas up to the topic's partition count (8) — Kafka rebalances
+   ownership automatically; idempotent writes make rebalance-induced redelivery safe.
+3. **Kafka**: already the buffer for 10–100× bursts (demonstrated ~11k events/s
+   accepted on a laptop); add partitions/brokers for sustained growth.
+4. **Postgres**: time-partition `inference_logs` + retention drops → rollup tables for
+   dashboard aggregates → move analytics to ClickHouse at Langfuse-scale volumes
+   (tens of thousands of events/minute), keeping Postgres for OLTP (ADR-6).
+5. **Content storage**: previews are capped; full-payload capture would move bodies to
+   object storage with references in rows (the Langfuse v3 / Helicone pattern).
+
+## 7 · Operational notes
 
 - Postgres via psycopg3 with Django's native connection pool (`CONN_MAX_AGE=0` + pool,
   required under ASGI).
