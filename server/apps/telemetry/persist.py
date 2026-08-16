@@ -1,6 +1,8 @@
 """Idempotent persistence for generation events — shared by the Kafka consumer
 and the direct-write fallback. Replaying any event yields the same final row."""
 
+from django.utils import timezone
+
 from apps.telemetry.models import InferenceLog
 from apps.telemetry.schemas import GenerationEndBody, GenerationStartBody
 
@@ -30,7 +32,10 @@ def persist_end(project_id: str, body: GenerationEndBody) -> None:
             session_id=body.session_id,
             provider="other",
             request_model=body.response_model or "unknown",
-            started_at=body.completed_at or body.first_chunk_at,
+            # An end event may legitimately carry no timestamps (aborted client,
+            # partial payload). Fall back so the row is still recorded rather
+            # than dead-lettered on a NOT NULL violation.
+            started_at=body.completed_at or body.first_chunk_at or timezone.now(),
         )
     for f in END_FIELDS:
         value = getattr(body, f)

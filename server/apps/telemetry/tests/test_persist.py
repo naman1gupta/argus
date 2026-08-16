@@ -60,3 +60,14 @@ def test_end_before_start_creates_stub_then_start_noop(project):
 
     persist_event(project.id, "generation-start", START)
     assert InferenceLog.objects.filter(generation_id="gen_9").count() == 1
+
+
+@pytest.mark.django_db
+def test_end_without_timestamps_still_persists(project):
+    """A partial end event (no completed_at/first_chunk_at) must not violate
+    NOT NULL and get dead-lettered — it falls back to ingestion time."""
+    minimal_end = {"generation_id": "gen_partial", "session_id": "s", "status": "error",
+                   "error_type": "ClientAbort"}
+    persist_event(project.id, "generation-end", minimal_end)
+    row = InferenceLog.objects.get(generation_id="gen_partial")
+    assert row.status == "error" and row.started_at is not None

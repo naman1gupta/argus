@@ -20,6 +20,7 @@ from django.db.models.functions import Coalesce
 from django.http import HttpResponse, StreamingHttpResponse
 from django.utils import timezone
 from ninja import Router, Schema
+from ninja.errors import HttpError
 
 from apps.accounts.security import admin_auth, session_auth
 from apps.chat.models import Message, Session
@@ -240,7 +241,9 @@ def logs(
 @router.get("/logs/{generation_id}", auth=admin_auth)
 def log_detail(request, generation_id: str):
     row = InferenceLog.objects.filter(generation_id=generation_id).values().first()
-    return row or (404, {"detail": "not found"})
+    if row is None:
+        raise HttpError(404, "generation not found")
+    return row
 
 
 @router.get("/sessions", auth=admin_auth)

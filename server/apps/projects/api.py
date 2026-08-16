@@ -1,7 +1,9 @@
 from datetime import datetime
 
+from django.db import IntegrityError
 from django.utils import timezone
 from ninja import Router, Schema
+from ninja.errors import HttpError
 
 from apps.accounts.security import admin_auth
 from apps.projects.models import Project
@@ -34,9 +36,15 @@ def list_projects(request):
 
 @router.post("", response={201: ProjectCreatedOut})
 def create_project(request, payload: ProjectIn):
-    project = Project(name=payload.name, environment=payload.environment, created_by=request.auth)
+    name = payload.name.strip()
+    if not name:
+        raise HttpError(400, "project name is required")
+    project = Project(name=name, environment=payload.environment, created_by=request.auth)
     raw_key = project.issue_key()
-    project.save()
+    try:
+        project.save()
+    except IntegrityError as exc:
+        raise HttpError(409, f"a project named '{name}' already exists") from exc
     return 201, ProjectCreatedOut(ingestion_key=raw_key, **ProjectOut.from_orm(project).dict())
 
 
