@@ -20,6 +20,7 @@ class Project(models.Model):
     key_hash = models.CharField(max_length=64, unique=True)
     key_hint = models.CharField(max_length=20)  # first/last chars for display
     key_rotated_at = models.DateTimeField(auto_now_add=True)
+    monthly_budget_usd = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name="projects"
     )

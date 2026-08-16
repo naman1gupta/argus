@@ -89,8 +89,8 @@ KAFKA_DLQ_TOPIC = os.environ.get("KAFKA_DLQ_TOPIC", "inference_events.dlq")
 KAFKA_EVENTS_PARTITIONS = int(os.environ.get("KAFKA_EVENTS_PARTITIONS", "8"))
 KAFKA_CONSUMER_GROUP = os.environ.get("KAFKA_CONSUMER_GROUP", "argus-persister")
 
-# Ingestion API auth (static single-project key; per-project keys are future work)
-ARGUS_API_KEY = os.environ.get("ARGUS_API_KEY", "dev-argus-key")
+INGEST_RATE_LIMIT_PER_MIN = int(os.environ.get("INGEST_RATE_LIMIT_PER_MIN", "300"))
+PROVIDER_RATE_LIMIT_PER_MIN = int(os.environ.get("PROVIDER_RATE_LIMIT_PER_MIN", "20"))
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
