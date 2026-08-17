@@ -137,6 +137,7 @@ there aren't any.
 | Host application crashes | the in-memory buffer dies with it | up to 10,000 buffered events, roughly the last second of traffic |
 | Kafka down | the API writes synchronously to Postgres instead and reports `mode: "direct"` | nothing; ingestion responses just get slower |
 | Worker down or crash-looping | events pile up in Kafka (7-day retention) and `/health` reports rising `consumer_lag`, visible in the UI footer | nothing; persistence is delayed, and offsets are only committed after a successful write |
+| Broker not up yet when the worker starts | the worker retries the connection with capped backoff rather than exiting, so a cold start where everything boots at once settles on its own | nothing |
 | Poison event that always raises | three attempts, then dead-lettered to `inference_events.dlq` with the error attached, offset committed | nothing; it's quarantined for inspection instead of blocking the partition |
 | Duplicate delivery from at-least-once, retries or replay | unique `generation_id` plus a deterministic end-merge | nothing; `scripts/burst_demo.py` demonstrates it |
 | Provider stream aborted mid-flight | recorded as aborted with estimated usage and `tokens_estimated=true` | nothing, but the token counts are flagged as estimates rather than presented as fact |
@@ -174,7 +175,7 @@ index-friendly, and sortable when they show up in logs.
 Compose boot order is health-gated. Postgres and Kafka come up healthy first, then the API
 runs migrations, creates topics and seeds, then the worker and frontend start.
 
-There are 45 tests across the two suites. The SDK side covers fail-open behaviour, queue
+There are 47 tests across the two suites. The SDK side covers fail-open behaviour, queue
 overflow, retries, masking false positives, and wrapper streaming including the abort case.
 The server side covers validation, the 207 response, idempotent replay, an end event
 arriving before its start, RBAC, rate limits, SSE chat through the ASGI test client, and

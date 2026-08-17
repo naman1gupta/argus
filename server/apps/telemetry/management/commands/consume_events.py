@@ -20,6 +20,26 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         asyncio.run(self.run())
 
+    async def start_when_ready(self, client, attempts=30, base_delay=2.0):
+        """Wait for the broker rather than dying when it isn't up yet.
+
+        Compose gates us behind a healthcheck, but Kubernetes has no depends_on:
+        the worker starts alongside Kafka, and exiting on the first refused
+        connection turns an ordinary cold start into a CrashLoopBackOff.
+        """
+        for attempt in range(1, attempts + 1):
+            try:
+                await client.start()
+                return
+            except Exception as exc:  # noqa: BLE001
+                if attempt == attempts or self.stopping.is_set():
+                    raise
+                delay = min(base_delay * attempt, 15)
+                log.warning(
+                    "kafka not ready (%s); retrying in %.0fs (%d/%d)", exc, delay, attempt, attempts
+                )
+                await asyncio.sleep(delay)
+
     async def run(self):
         self.stopping = asyncio.Event()
         loop = asyncio.get_running_loop()
@@ -38,8 +58,8 @@ class Command(BaseCommand):
             bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
             value_serializer=lambda v: json.dumps(v, default=str).encode(),
         )
-        await consumer.start()
-        await dlq.start()
+        await self.start_when_ready(consumer)
+        await self.start_when_ready(dlq)
         log.info("consumer started (group=%s)", settings.KAFKA_CONSUMER_GROUP)
         try:
             while not self.stopping.is_set():

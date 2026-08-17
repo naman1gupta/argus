@@ -148,12 +148,19 @@ spec:
           ports: [{ containerPort: 8000 }]
           envFrom: [{ configMapRef: { name: argus-config } }, { secretRef: { name: argus-secrets } }]
           readinessProbe:
-            # kubelet probes the pod IP as Host; exec-probe with an explicit
-            # Host header keeps ALLOWED_HOSTS strict instead of widening it.
-            exec:
-              command: ["python", "-c", "import urllib.request as u; u.urlopen(u.Request('http://127.0.0.1:8000/api/v1/health', headers={'Host': 'localhost'}))"]
+            # kubelet probes by pod IP, which ALLOWED_HOSTS rejects, so send an
+            # explicit Host header rather than widening ALLOWED_HOSTS to '*'.
+            # httpGet, not exec: an exec probe had to boot a Python interpreter on
+            # every check, which blows past the default 1s timeout on a busy node
+            # and leaves the pod stuck at 0/1 while the app is perfectly healthy.
+            httpGet:
+              path: /api/v1/health
+              port: 8000
+              httpHeaders: [{ name: Host, value: localhost }]
             initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
           resources:
             requests: { cpu: 250m, memory: 256Mi }
             limits: { cpu: "1", memory: 512Mi }
@@ -215,6 +222,14 @@ spec:
           image: argus-frontend:latest
           imagePullPolicy: Never
           ports: [{ containerPort: 80 }]
+          env:
+            # nginx ignores resolv.conf search domains, so the bare Service name
+            # "api" resolves under Docker but not under CoreDNS. Pass the FQDN,
+            # built from the pod's own namespace so this works wherever it lands.
+            - name: POD_NAMESPACE
+              valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+            - name: ARGUS_API_UPSTREAM
+              value: "api.$(POD_NAMESPACE).svc.cluster.local:8000"
           readinessProbe:
             httpGet: { path: /, port: 80 }
             initialDelaySeconds: 3

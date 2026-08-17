@@ -205,11 +205,11 @@ cd server && python3.13 -m venv .venv && .venv/bin/pip install -r requirements-d
 .venv/bin/python manage.py consume_events                  # terminal 2
 cd web && npm install && npm run dev                       # terminal 3, port 5173
 
-cd server && .venv/bin/python -m pytest         # 21 tests
+cd server && .venv/bin/python -m pytest         # 23 tests
 cd sdk && ../server/.venv/bin/python -m pytest  # 24 tests
 ```
 
-45 tests in total, covering SDK fail-open behaviour, masking and the provider wrappers on
+47 tests in total, covering SDK fail-open behaviour, masking and the provider wrappers on
 one side, and ingestion validation, idempotency, RBAC and SSE on the other. CI runs both
 suites plus lint and a web build on every push.
 
@@ -250,11 +250,31 @@ kubectl port-forward svc/argus-frontend 8080:80
 ```
 
 Five pods: api (with a migrate-and-seed init container), worker, frontend, Postgres and
-Kafka. Two details in there are fixes for real bugs I hit while verifying. Pods set
-`enableServiceLinks: false`, because Kubernetes otherwise injects `POSTGRES_PORT=tcp://…`
-for the postgres Service and clobbers the app's own environment variable. And the API
-readiness probe is an exec probe that sends an explicit `Host` header, so `ALLOWED_HOSTS`
-can stay strict instead of being widened to accept the kubelet's pod-IP requests.
+Kafka. Four details in there are fixes for real bugs I hit while verifying, every one of
+them invisible under Compose.
+
+Pods set `enableServiceLinks: false`, because Kubernetes otherwise injects
+`POSTGRES_PORT=tcp://…` for the postgres Service and clobbers the app's own environment
+variable. The API readiness probe is an exec probe that sends an explicit `Host` header, so
+`ALLOWED_HOSTS` can stay strict instead of being widened to accept the kubelet's pod-IP
+requests. And nginx's `resolver` is filled in from `/etc/resolv.conf` at container start
+rather than hardcoded, because Docker's embedded DNS lives at `127.0.0.11` while Kubernetes
+hands out the CoreDNS service IP. I originally hardcoded the Docker address to fix a
+stale-upstream bug in Compose, which quietly broke every `/api/` call under Kubernetes with
+a 502 while the SPA itself still loaded.
+
+For the same reason the upstream address is `${ARGUS_API_UPSTREAM}` rather than a literal
+`api:8000`: nginx does not apply the search domains from `resolv.conf`, so a bare Service
+name resolves under Docker's embedded DNS and not under CoreDNS. The manifest passes the
+fully-qualified name, built from the pod's own namespace via the downward API.
+
+And the worker waits for Kafka with backoff instead of exiting on a refused connection.
+Compose gates it behind a healthcheck, Kubernetes starts everything at once, so exiting
+turned an ordinary cold start into a CrashLoopBackOff.
+
+None of these four could have been caught by the test suite or by CI, because neither
+deploys anything. They are the argument for running the thing in both places rather than
+assuming one implies the other.
 
 ## Providers
 

@@ -1,0 +1,12 @@
+#!/bin/sh
+# Pick up whatever DNS server this runtime actually uses: Docker's embedded
+# resolver is 127.0.0.11, Kubernetes hands out the CoreDNS service IP. Hardcoding
+# either one breaks the other, so read it from resolv.conf at start-up.
+# Sourced by the nginx entrypoint (.envsh) before the template is rendered.
+ARGUS_RESOLVER="$(awk '/^nameserver/ { print ($2 ~ /:/) ? "["$2"]" : $2; exit }' /etc/resolv.conf)"
+export ARGUS_RESOLVER="${ARGUS_RESOLVER:-127.0.0.11}"
+
+# Upstream address. nginx does NOT apply resolv.conf search domains, so a bare
+# "api" resolves under Docker's embedded DNS but not under CoreDNS — Kubernetes
+# needs the fully-qualified Service name, which the manifest passes in.
+export ARGUS_API_UPSTREAM="${ARGUS_API_UPSTREAM:-api:8000}"
