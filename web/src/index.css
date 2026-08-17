@@ -67,7 +67,9 @@ body::before {
   padding:9px 13px; color:var(--ink); font-size:13.5px; outline:none; transition:.15s;
 }
 .input:focus { border-color:#3987e5; box-shadow:0 0 0 3px rgba(57,135,229,.18); }
-select.input { padding:7px 10px; font-size:12.5px; }
+/* A select sizes itself to its longest option, which overflows the card on a
+   phone. Cap it and let the label truncate instead. */
+select.input { padding:7px 10px; font-size:12.5px; max-width:100%; min-width:0; }
 
 .pill {
   display:inline-flex; align-items:center; gap:5px; padding:2.5px 9px;

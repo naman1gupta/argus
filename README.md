@@ -53,6 +53,11 @@ with zero credentials, not to be a chatbot. For real answers, drop a `GROQ_API_K
 `GEMINI_API_KEY` into `.env` (both have free tiers) and pick that model in the chat.
 The same SDK instrumentation captures all of them.
 
+A six-minute silent walkthrough (captioned, 1080p) accompanies the submission. It covers the
+member and admin views, then the backend: the ingestion contract, the Kafka consumer group,
+the schema and indexes, and a live resilience run where the broker and the consumer are killed
+and the backlog drains back to zero.
+
 ## A tour, in the order I'd click it
 
 **Log in as `admin`.**
