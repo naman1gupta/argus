@@ -136,6 +136,7 @@ async def send_message(request, session_id: str, payload: SendIn):
     async def stream():
         parts: list[str] = []
         status = "done"
+        gen = None
         try:
             gen = adapter.stream(
                 payload.model, history, session_id=session.id, end_user_id=user.username
@@ -144,6 +145,11 @@ async def send_message(request, session_id: str, payload: SendIn):
                 parts.append(delta)
                 yield _sse("token", {"d": delta})
         except asyncio.CancelledError:
+            # Close the adapter chain by hand. The SDK reports an aborted generation
+            # from GeneratorExit, and leaving that to garbage collection means the
+            # end event may never be emitted — the row stays pending forever.
+            if gen is not None:
+                await gen.aclose()
             await _save_assistant(session, seq + 1, parts, payload, aborted=True)
             raise
         except (ProviderError, Exception) as exc:  # noqa: BLE001

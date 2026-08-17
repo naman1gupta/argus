@@ -7,6 +7,7 @@ Streaming facts encoded here:
 - an aborted stream never receives that chunk -> usage is estimated
 """
 
+import asyncio
 import functools
 
 from argus.wrappers._common import estimate_tokens, extract_prompt, pick_params
@@ -153,7 +154,7 @@ def _async_create(original, argus_client, provider, gen_ctx):
                     state.feed(chunk, gen)
                     yield chunk
                 gen.end(**state.end_kwargs(aborted=False))
-            except GeneratorExit:
+            except (GeneratorExit, asyncio.CancelledError):
                 gen.end(**state.end_kwargs(aborted=True))
                 raise
             except Exception as exc:

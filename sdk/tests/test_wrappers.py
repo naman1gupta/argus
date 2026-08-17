@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace as NS
 
 import pytest
@@ -119,3 +120,50 @@ def test_openai_non_stream(capture):
     end = capture.events[-1][1]
     assert end["status"] == "success" and end["output_tokens"] == 5
     assert end["cost_usd"] is not None
+
+
+class AsyncFakeOpenAI:
+    """Async client whose stream blocks forever after the first chunk, so a
+    consumer cancelling mid-stream is what ends it."""
+
+    def __init__(self):
+        self.chat = NS(completions=NS(create=self._create))
+
+    async def _create(self, **kwargs):
+        async def gen():
+            yield NS(model="llama-3.3-70b-versatile", usage=None,
+                     choices=[NS(delta=NS(content="Hello"), finish_reason=None)])  # fmt: skip
+            await asyncio.Event().wait()  # never resolves; the caller must cancel
+
+        return gen()
+
+
+@pytest.mark.asyncio
+async def test_async_stream_cancelled_mid_flight_is_aborted(capture):
+    """A cancelled async stream must still be recorded.
+
+    ASGI servers cancel the task on client disconnect, which raises CancelledError
+    inside the stream loop rather than GeneratorExit. CancelledError is a
+    BaseException, so a bare `except Exception` misses it and the generation would
+    stay pending forever.
+    """
+    client = wrap_openai(AsyncFakeOpenAI(), argus_client=capture)
+    stream = await client.chat.completions.create(
+        model="llama-3.3-70b-versatile", stream=True,
+        messages=[{"role": "user", "content": "hi"}],
+    )  # fmt: skip
+
+    async def consume():
+        async for _ in stream:
+            pass
+
+    task = asyncio.create_task(consume())
+    await asyncio.sleep(0.05)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    end = capture.events[-1][1]
+    assert end["status"] == "aborted"
+    assert end["tokens_estimated"] is True
+    assert end["output_tokens"] >= 1

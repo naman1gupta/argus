@@ -7,6 +7,7 @@ Streaming telemetry facts this encodes:
 - an abandoned stream never sees message_delta -> usage is estimated
 """
 
+import asyncio
 import functools
 
 from argus.wrappers._common import estimate_tokens, extract_prompt, pick_params
@@ -146,7 +147,7 @@ def _async_create(original, argus_client, gen_ctx):
                     state.feed(event, gen)
                     yield event
                 gen.end(**state.end_kwargs(aborted=False))
-            except GeneratorExit:
+            except (GeneratorExit, asyncio.CancelledError):
                 gen.end(**state.end_kwargs(aborted=True))
                 raise
             except Exception as exc:

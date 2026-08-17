@@ -5,6 +5,7 @@ Streaming facts encoded here:
 - thinking tokens (thoughts_token_count) bill as output and are tracked separately
 """
 
+import asyncio
 import functools
 
 from argus.wrappers._common import estimate_tokens
@@ -172,7 +173,7 @@ def _async_stream(original, argus_client, gen_ctx):
                         text.append(chunk.text)
                     yield chunk
                 gen.end(**_usage_kwargs(usage, "".join(text), last))
-            except GeneratorExit:
+            except (GeneratorExit, asyncio.CancelledError):
                 gen.end(**_usage_kwargs(usage, "".join(text), last, aborted=True))
                 raise
             except Exception as exc:

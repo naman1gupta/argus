@@ -30,6 +30,19 @@ class ProviderError(Exception):
     pass
 
 
+async def _aclose(stream) -> None:
+    """Close a provider stream so the SDK sees GeneratorExit and ends the generation.
+
+    This has to be called from a `finally` in the same frame that iterates the stream.
+    Exiting an `async for` early does not close the generator it was iterating, and
+    waiting for garbage collection to do it is too late: the telemetry row would sit
+    at pending forever instead of being recorded as aborted.
+    """
+    aclose = getattr(stream, "aclose", None)
+    if aclose is not None:
+        await aclose()
+
+
 class Adapter(ABC):
     name: str
     label: str
@@ -65,11 +78,14 @@ class AnthropicAdapter(Adapter):
             stream=True,
             argus_context={"session_id": session_id, "end_user_id": end_user_id},
         )
-        async for event in stream:
-            if getattr(event, "type", "") == "content_block_delta":
-                text = getattr(event.delta, "text", None)
-                if text:
-                    yield text
+        try:
+            async for event in stream:
+                if getattr(event, "type", "") == "content_block_delta":
+                    text = getattr(event.delta, "text", None)
+                    if text:
+                        yield text
+        finally:
+            await _aclose(stream)
 
 
 class OpenAICompatibleAdapter(Adapter):
@@ -102,10 +118,13 @@ class OpenAICompatibleAdapter(Adapter):
             stream=True,
             argus_context={"session_id": session_id, "end_user_id": end_user_id},
         )
-        async for chunk in stream:
-            choices = getattr(chunk, "choices", None) or []
-            if choices and getattr(choices[0].delta, "content", None):
-                yield choices[0].delta.content
+        try:
+            async for chunk in stream:
+                choices = getattr(chunk, "choices", None) or []
+                if choices and getattr(choices[0].delta, "content", None):
+                    yield choices[0].delta.content
+        finally:
+            await _aclose(stream)
 
 
 class GroqAdapter(OpenAICompatibleAdapter):
@@ -154,9 +173,12 @@ class GeminiAdapter(Adapter):
             contents=contents,
             argus_context={"session_id": session_id, "end_user_id": end_user_id},
         )
-        async for chunk in stream:
-            if chunk.text:
-                yield chunk.text
+        try:
+            async for chunk in stream:
+                if chunk.text:
+                    yield chunk.text
+        finally:
+            await _aclose(stream)
 
 
 MOCK_NOTES = [
@@ -232,7 +254,7 @@ class MockAdapter(Adapter):
                 response=reply,
                 response_model=model,
             )
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, GeneratorExit):
             gen.end(status="aborted", tokens_estimated=True,
                     output_tokens=max(len("".join(text_so_far)) // 4, 1),
                     response="".join(text_so_far))  # fmt: skip
