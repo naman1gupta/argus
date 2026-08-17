@@ -1,172 +1,197 @@
-# Decision Records
+# Decision records
 
-Short ADRs: the decision, why, what was rejected, and the condition under which the
-rejected option becomes right. Written before/while building, not after.
+Ten decisions that shaped this build. For each one: what I chose, why, what I turned down,
+and what would have to be true for me to choose differently. I wrote these while building,
+not afterwards, which is why a couple of them admit the alternative was close.
 
 ---
 
-## ADR-1 · Kafka for the ingestion pipeline (vs Redis Streams vs Celery vs direct writes)
+## ADR-1. Kafka for the ingestion pipeline
 
-**Decision:** Ingestion accepts events, validates, and produces to a Kafka topic
-(KRaft single broker, 8 partitions, key = `session_id`); a consumer group persists to
-Postgres with manual offset commits after successful writes; poison messages go to a
-DLQ topic after 3 attempts.
+Ingestion accepts events, validates them, and produces to a Kafka topic. Single broker in
+KRaft mode, 8 partitions, keyed by `session_id`. A consumer group persists to Postgres and
+commits offsets by hand after the write succeeds. Poison messages go to a dead-letter topic
+after three attempts.
 
-**Why:** (a) Partitioning by session gives per-conversation ordering — a
-`generation-start` is never processed after its `generation-end`, without global
-ordering costs. (b) At-least-once semantics are explicit: manual commits after
-persistence + idempotent writes, visible in ~80 lines of consumer code rather than
-hidden inside a task framework. (c) It absorbs bursts: the API acknowledges in
-milliseconds regardless of DB write latency. (d) This is the production-proven shape
-for exactly this workload — Helicone runs request/response logging through Kafka into
-batched DB upserts.
+The partition key is doing real work. Keying by session means a `generation-start` is never
+processed after its matching `generation-end`, and I get that ordering without paying for
+global ordering. Beyond that, at-least-once semantics are explicit here rather than
+implied: manual commits after persistence, idempotent writes, and about 80 lines of
+consumer code you can read end to end instead of a task framework's internals. And the API
+acknowledges in milliseconds no matter how slow the database is, which is the whole point
+of putting a log in front of a write. This is also the shape the category has converged on;
+Helicone runs request and response logging through Kafka into batched database upserts.
 
-**Rejected:** *Direct synchronous writes* — simplest, and kept as the degraded mode
-(Kafka down → write-through with a warning; availability over purity), but couples
-client-observed latency to DB health and drops the burst buffer. *Celery* — its Redis
-broker is BRPOP-on-lists with a visibility-timeout redelivery hack; consumer-group
-semantics, replay, and dead-lettering are hidden or absent, so it demonstrates
-`.delay()` rather than event-driven design. *Redis Streams* — genuinely right-sized
-for this scale (XREADGROUP/XACK/XAUTOCLAIM give similar semantics with a lighter
-container) and the honest alternative; Kafka won on partition-key ordering, the DLQ
-story, and operational familiarity.
+I rejected three alternatives. **Direct synchronous writes** are the simplest thing that
+works, and I kept them as the degraded mode when Kafka is unavailable, but as the primary
+path they tie client-observed latency to database health and give up the burst buffer.
+**Celery** would have been fewer moving parts, but its Redis broker is BRPOP on lists with
+a visibility-timeout redelivery hack; consumer groups, replay and dead-lettering are either
+hidden or absent, so I'd have been demonstrating `.delay()` rather than event-driven
+design. **Redis Streams** is the honest alternative and genuinely right-sized for this
+volume — XREADGROUP, XACK and XAUTOCLAIM give you similar semantics in a much lighter
+container. Kafka won on partition-key ordering, the dead-letter story, and the fact that I
+have operated it before.
 
-**Flip condition:** if operational simplicity mattered more than ordering/throughput
-semantics (e.g. a single-node deployment forever), Redis Streams; if volume grew to
-Helicone scale, this design already is the scaled shape — add partitions/consumers.
+If operational simplicity mattered more than ordering and throughput, say a single-node
+deployment that will never grow, I'd take Redis Streams. If volume grew toward Helicone
+scale, this design is already the scaled shape; you add partitions and consumers.
 
-## ADR-2 · Fail-open SDK with bounded buffering (vs guaranteed delivery)
+## ADR-2. A fail-open SDK with bounded buffering
 
-**Decision:** The SDK never raises into, blocks, or slows the host app. Events go to a
-bounded in-memory queue (10k, drop-oldest, counted); a daemon thread ships batches
-(20 events / 1s, whichever first) with 3 retries + backoff; `atexit` flush; explicit
-`flush()` for short-lived processes.
+The SDK never raises into the host application, never blocks it, and never slows it down.
+Events go into a bounded in-memory queue (10,000, drop-oldest, with a counter), and a
+daemon thread ships batches of 20 or once a second, whichever comes first, with three
+retries and backoff. There's an `atexit` flush and an explicit `flush()` for short-lived
+processes.
 
-**Why:** Telemetry must never become the outage. An SDK that can throw or block on a
-logging backend converts an observability incident into a product incident.
+The reasoning is that telemetry must never become the outage. An SDK that can throw or
+block on its logging backend turns an observability problem into a product incident, and
+the customer never signed up for that trade.
 
-**Cost, quantified:** a hard crash can lose up to `queue_len` buffered events (bounded
-by 10k or ~1s of traffic); an unreachable collector drops batches after retries. Both
-are logged. Delivery is at-least-once (retries can duplicate), which is why ingestion
-is idempotent end-to-end (ADR-4).
+The cost is real and I'd rather quantify it than gloss it: a hard crash loses whatever is
+in the queue, bounded by 10,000 events or roughly a second of traffic, and an unreachable
+collector drops batches after its retries. Both are logged and counted. Delivery is
+at-least-once, since retries can duplicate, which is exactly why ingestion is idempotent
+end to end (ADR-4).
 
-**Rejected:** durable client-side spooling (WAL file) — right for billing-grade
-pipelines, heavy for an observability SDK; the same guarantee is provided server-side
-by Kafka once an event is accepted.
+I considered durable client-side spooling to a write-ahead file. That's the right answer
+for a billing-grade pipeline where every event is money, and too heavy for an observability
+SDK. Once an event has been accepted, Kafka provides the same guarantee server-side.
 
-## ADR-3 · Langfuse-style batch envelope with 207 Multi-Status
+## ADR-3. A batch envelope with 207 Multi-Status
 
-**Decision:** `POST /api/v1/logs` takes `{batch: [{id, timestamp, type, body}]}`.
-Each item validates independently; the response is `202` (all accepted) or `207` with
-per-item `{id, status, error}`. Envelope `id` (event identity, dedup) is distinct from
-`body.generation_id` (entity identity, upsert key).
+`POST /api/v1/logs` takes `{batch: [{id, timestamp, type, body}]}`. Every item validates
+independently and the response is either 202, if all were accepted, or 207 with a per-item
+`{id, status, error}`.
 
-**Why:** one malformed event must not reject a batch of good ones — batching clients
-otherwise lose valid data or retry-loop entire batches. The event-id/entity-id split
-is what makes "two events, one row" (start/end) idempotent. This mirrors Langfuse's
-public ingestion contract, the de-facto standard for this product category.
+One malformed event must not reject a batch of good ones. Without per-item results a
+batching client either loses valid data or retry-loops the whole batch forever, and in both
+cases it can't tell you which event was the problem.
 
-## ADR-4 · Two-phase events (start/end) with idempotent persistence
+The envelope `id` and `body.generation_id` are deliberately different things: the first is
+event identity, used for deduplication, and the second is entity identity, used as the
+upsert key. Keeping them separate is what makes "two events, one row" work. The shape
+follows Langfuse's public ingestion contract, which is the closest thing this category has
+to a standard.
 
-**Decision:** The SDK emits `generation-start` at request time and `generation-end` at
-completion. Starts insert `PENDING` rows (`ON CONFLICT DO NOTHING` on unique
-`generation_id`); ends are a deterministic merge; end-before-start creates a stub the
-late start can't overwrite. Replaying any event yields the same final row.
+## ADR-4. Two-phase events with idempotent persistence
 
-**Why:** (a) in-flight calls are visible in the live dashboard — "near-real-time"
-becomes a product feature, not just a pipeline property; (b) crashes leave a
-truthful `pending` record instead of nothing; (c) at-least-once delivery (ADR-1/2)
-demands idempotency anyway, so the write path is designed for replay from the start.
+The SDK emits `generation-start` when the request begins and `generation-end` when it
+finishes, errors or is aborted. Starts insert a pending row with `ON CONFLICT DO NOTHING`
+against the unique `generation_id`; ends are a deterministic merge. An end that somehow
+arrives before its start creates a stub that the late start is not allowed to overwrite.
+Replaying any event produces the same final row.
 
-## ADR-5 · Django Ninja (vs Django REST Framework)
+Three reasons. In-flight calls become visible in the live dashboard, which turns
+"near-real-time" into something you can watch rather than a property of the pipeline. A
+crash mid-generation leaves a truthful pending record instead of nothing at all. And since
+at-least-once delivery was already a given, the write path had to be replay-safe regardless,
+so I designed for it from the first migration instead of bolting it on.
 
-**Decision:** Django Ninja for all APIs.
+## ADR-5. Django Ninja rather than Django REST Framework
 
-**Why:** native `async def` endpoints (the SSE chat stream and Kafka live-tail
-endpoints are async generators; DRF is sync-only), pydantic-v2 validation on the hot
-ingestion path (Rust-core parsing of nested JSON), and OpenAPI/Swagger for free at
-`/api/v1/docs`. Still 100% Django: ORM, migrations, auth, middleware unchanged.
+Ninja for all the APIs.
 
-**Rejected:** DRF — the safe idiomatic default and the right call in an existing DRF
-codebase; for a greenfield service whose two hottest endpoints are async streaming and
-high-frequency JSON validation, Ninja is the technically stronger fit (cf. Kogan.com's
-published DRF→Ninja migration). Session-cookie auth still enforces CSRF via Ninja's
-SessionAuth.
+The two hottest endpoints in this system are an SSE chat stream and a Kafka live tail, both
+async generators, and DRF is sync-only. Ninja gives native `async def`, pydantic v2
+validation on the ingestion path (which is the highest-frequency JSON parsing in the app,
+and pydantic's Rust core matters there), and OpenAPI at `/api/v1/docs` for free. It's still
+entirely Django underneath: same ORM, migrations, auth and middleware.
 
-## ADR-6 · Postgres only (vs adding ClickHouse/Timescale)
+DRF is the safe, idiomatic default and I'd use it without hesitating inside an existing DRF
+codebase. For a greenfield service shaped like this one, Ninja is the better technical fit.
+Session-cookie auth still enforces CSRF through Ninja's SessionAuth, so nothing was traded
+away on security.
 
-**Decision:** One Postgres serves both OLTP (users, sessions, projects) and analytics
-(inference_logs), with typed columns + JSONB and targeted indexes (see SCHEMA.md).
+## ADR-6. One Postgres, no ClickHouse
 
-**Why:** at take-home/early-production volume (even 100k events/day) Postgres has
-enormous headroom; a second database would be resume-driven complexity. The failure
-mode is known precisely: Langfuse ran this exact design and published the postmortem —
-at tens of thousands of events *per minute*, ingestion latency spiked to ~50s on IOPS
-exhaustion and analytical scans over blob-heavy rows.
+A single Postgres serves both the OLTP tables (users, sessions, projects) and the analytical
+one (inference logs), using typed columns plus JSONB and a small number of targeted indexes.
 
-**Scale path (in order):** time-based declarative partitioning + retention drops →
-rollup tables for dashboard aggregates → move `inference_logs` to a columnar store
-(ClickHouse) while Postgres keeps OLTP — i.e. Langfuse v3's architecture.
+At this volume, and honestly at a hundred thousand events a day, Postgres has enormous
+headroom. A second datastore would be complexity I couldn't justify to anyone who had to
+operate it.
 
-## ADR-7 · Masking client-side, before egress (vs server-side only)
+What makes me comfortable is that the failure mode is documented rather than guessed at.
+Langfuse ran this exact design and published the postmortem: at tens of thousands of events
+per minute, ingestion latency spiked to around 50 seconds as IOPS were exhausted and
+analytical scans crawled over blob-heavy rows.
 
-**Decision:** PII masking runs inside the SDK, before truncation and before any byte
-leaves the host process: prefix-anchored secrets (API keys, JWTs) → checksummed
-numerics (credit cards via Luhn, Aadhaar via Verhoeff, SSN with exclusion rules) →
-pattern entities (email, Indian mobile, IPv4). Entities found are stored as a
-queryable column; `log_content=False` omits content entirely (metadata still flows).
+So the scale path is known and ordered: time-based declarative partitioning with retention
+drops, then rollup tables for the dashboard aggregates, and only then move the log table to
+a columnar store while Postgres keeps the OLTP work. That last step is Langfuse v3's
+architecture, arrived at the same way.
 
-**Why:** the industry consensus (Langfuse mask hook, OTel GenAI content-off-by-default)
-is that sensitive data should never leave the producing environment in raw form —
-server-side scrubbing is defense-in-depth, not the primary control. Checksums kill the
-false positives that make bare regex masking noisy (a random 16-digit order id fails
-Luhn; ZIP+4 is excluded from SSN). Honest limitation, documented: person names and
-addresses need NER — Microsoft Presidio is the production path (its ~750MB spaCy model
-is a poor fit for a demo image).
+## ADR-7. Masking in the SDK, before egress
 
-## ADR-8 · Wrapper instrumentation (vs proxy vs global monkey-patching)
+PII masking runs inside the SDK, before truncation and before any byte leaves the host
+process. The order is prefix-anchored secrets first (API keys, JWTs), then checksummed
+numerics (credit cards through Luhn, Aadhaar through Verhoeff, SSN with exclusion rules),
+then pattern entities (email, Indian mobile, IPv4). The entities found are stored as a
+queryable column, and `log_content=False` drops content entirely while metadata keeps
+flowing.
 
-**Decision:** `wrap_anthropic(client)` / `wrap_openai(client)` / `wrap_gemini(client)`
-return the same client with instance methods instrumented; nothing global is mutated.
-A manual `generation()` context manager and `@observe` cover non-standard cases.
+The consensus in this space, from Langfuse's mask hook to OTel GenAI defaulting content
+off, is that sensitive data should never leave the producing environment in raw form.
+Server-side scrubbing is defence in depth, not the primary control.
 
-**Why:** a proxy (Helicone-style base_url swap) is the easiest integration but puts
-the logger in the request critical path — a telemetry outage becomes an LLM outage,
-the exact inverse of ADR-2. Global monkey-patching is magic at a distance and the most
-fragile surface across SDK upgrades. Instance wrapping is explicit, composable, and
-testable; per-call context (`argus_context={session_id, end_user_id}`) is popped
-before kwargs reach the provider.
+Checksums are what make it usable. Bare regex masking is noisy enough that people turn it
+off: a random 16-digit order ID fails Luhn and is left alone, and ZIP+4 is excluded from the
+SSN pattern. Masking runs before truncation so a card number straddling the truncation
+boundary can't escape as two harmless-looking halves.
 
-**The hard-won details** (per-provider streaming usage capture) are documented in
-ARCHITECTURE.md: OpenAI's usage-bearing final chunk has an empty `choices` array;
-Anthropic splits usage across `message_start`/`message_delta`; Gemini's
-`usage_metadata` is cumulative on every chunk; TTFT is measured at the first *content*
-delta; aborted streams get estimated usage with a `tokens_estimated` flag.
+The limitation, stated plainly: names and addresses need NER, and this doesn't do that.
+Microsoft Presidio is the production answer, and its roughly 750MB spaCy model is a bad fit
+for an image people are meant to pull and run in a few minutes.
 
-## ADR-9 · In-memory rate limiting (vs shared store)
+## ADR-8. Wrapper instrumentation rather than a proxy
 
-**Decision:** Sliding-window limiters per ingestion key and per provider, in-process.
+`wrap_anthropic(client)`, `wrap_openai(client)` and `wrap_gemini(client)` hand back the same
+client with its instance methods instrumented. Nothing global is mutated. A manual
+`generation()` context manager and an `@observe` decorator cover anything that isn't a
+provider call.
 
-**Why:** correct for a single api instance (this deployment); zero moving parts.
-Honest caveat: at N instances the effective limit is N×; the fix is the same algorithm
-over a shared store (Redis) — noted for the scale path rather than adding a Redis
-dependency solely for this.
+A proxy, the Helicone-style base-URL swap, is the easiest integration story to sell, and it
+puts the logger directly in the request's critical path. That is precisely the inverse of
+ADR-2: a telemetry outage would become an LLM outage. Global monkey-patching is magic at a
+distance and the most fragile thing to maintain across provider SDK upgrades. Instance
+wrapping is explicit, composable and testable, and per-call context is popped from kwargs
+before the provider client ever sees it.
 
-## ADR-10 · OTel GenAI semantic conventions for field names
+The details that took the longest here, the per-provider streaming usage quirks, are in
+ARCHITECTURE.md rather than repeated: OpenAI's usage-bearing final chunk carries an empty
+`choices` array, Anthropic splits usage across two event types, Gemini's `usage_metadata`
+is cumulative on every chunk, TTFT has to be measured at the first content delta, and
+aborted streams get estimated usage behind a `tokens_estimated` flag.
 
-**Decision:** Column/field names follow the current OpenTelemetry GenAI registry:
-`gen_ai.provider.name` values (`anthropic`, `gcp.gemini`, …), `input_tokens` /
-`output_tokens` (not the deprecated `prompt_tokens`/`completion_tokens`),
-`time_to_first_chunk` semantics for TTFT.
+## ADR-9. In-memory rate limiting
 
-**Why:** makes the data OTLP-export-ready and spares every future consumer a
-translation layer. Note: the conventions renamed `gen_ai.system` →
-`gen_ai.provider.name` in semconv v1.37 (Aug 2025); we adopt the current names.
+Sliding-window limiters per ingestion key and per provider key, held in process.
 
-## Deliberately out of scope
+This is correct for a single API instance, which is what this deployment is, and it costs
+nothing to operate. The caveat is straightforward: at N instances the effective limit
+becomes N times the configured one. The fix is the same algorithm over Redis, and I've
+noted it on the scale path rather than adding a Redis dependency to this repo for one
+feature.
 
-Google OAuth (login is designed to swap: any authenticated Django backend works),
-Prometheus `/metrics` + Grafana (ops layer; the product dashboard was the deliverable),
-Slack/email alerting, retention policies, head-based sampling (SDK has `sample_rate`;
-server-side controls at scale), OTLP export endpoint, multi-instance rate limiting,
-ClickHouse (ADR-6). Chosen to keep every shipped line reviewable and defended.
+## ADR-10. OTel GenAI naming for fields
+
+Column and field names follow the current OpenTelemetry GenAI semantic conventions:
+`gen_ai.provider.name` values like `anthropic` and `gcp.gemini`, `input_tokens` and
+`output_tokens` rather than the deprecated `prompt_tokens` and `completion_tokens`, and
+time-to-first-chunk semantics for TTFT.
+
+It costs nothing now and it means the data is OTLP-export-ready, so nobody downstream has
+to write a translation layer. Worth noting that the conventions renamed `gen_ai.system` to
+`gen_ai.provider.name` in semconv v1.37, and this uses the current names.
+
+## Deliberately left out
+
+Google OAuth (the login is built to swap: any authenticated Django backend works), a
+Prometheus `/metrics` endpoint with Grafana, Slack and email alerting, retention policies,
+server-side sampling controls (the SDK has `sample_rate` already), an OTLP export endpoint,
+multi-instance rate limiting, and ClickHouse.
+
+Each of those is a real thing a production version needs. I left them out so that every
+line that did ship is one I can explain.
