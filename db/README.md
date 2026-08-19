@@ -35,7 +35,7 @@ docker compose exec -T api python manage.py sqlmigrate telemetry 0001
 
 **Typed columns with a JSONB tail.** Everything the dashboards filter, sort or aggregate on
 is a real typed column: `provider`, `request_model`, `status`, `latency_ms`, `ttft_ms`,
-`input_tokens`, `output_tokens`, `cost_usd`, `started_at`. Only the open-ended remainder
+the token counts and `cost_usd`. Only the provider-specific tail that nobody queries directly
 goes into `raw_metadata`. Pure JSONB would have been quicker to write and much slower to
 live with, because you can't cheaply run `percentile_cont` over a JSON field and every
 dashboard query would decay into a full scan.
